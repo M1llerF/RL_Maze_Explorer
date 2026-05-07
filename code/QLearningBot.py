@@ -157,6 +157,23 @@ class QLearningBot(BaseBot):
         self.total_reward = 0
         self.state = self.calculate_state()
 
+    # Training lifecycle hooks (explicit contract implementation)
+    def on_episode_start(self, mode: str) -> None:
+        if mode != "training":
+            raise ValueError(f"Unsupported episode mode for QLearningBot: {mode}")
+
+    def on_episode_step(self, mode: str, step_index: int) -> None:
+        if mode != "training":
+            raise ValueError(f"Unsupported episode mode for QLearningBot: {mode}")
+        if step_index < 0:
+            raise ValueError(f"step_index must be non-negative, got {step_index}")
+
+    def on_episode_end(self, mode: str, outcome: str) -> None:
+        if mode != "training":
+            raise ValueError(f"Unsupported episode mode for QLearningBot: {mode}")
+        if not outcome:
+            raise ValueError("outcome must be a non-empty string")
+
     # ---- Visualization step-wise execution helpers ----
     def begin_visualization_episode(self):
         """Initialize state for a step-wise episode run used by visualization."""
