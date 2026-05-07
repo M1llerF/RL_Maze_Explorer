@@ -1,10 +1,10 @@
+from __future__ import annotations
 
-from typing import Any, Dict, Tuple
-from typing import Dict
+from typing import Any, Callable
 import ast
 
 class RewardConfig:
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any) -> None:
         """
         Initialize the RewardConfig with default values or provided keyword arguments.
         """
@@ -14,7 +14,7 @@ class RewardConfig:
         self.revisit_penalty_non_optimal: int = kwargs.get('revisit_penalty_non_optimal', -15)
         self.step_penalty: int = kwargs.get('step_penalty', -1)
         self.goal_in_sight_reward: int = kwargs.get('goal_in_sight_reward', 50)
-        self.reward_modifiers: Dict[str, str] = kwargs.get('reward_modifiers', {
+        self.reward_modifiers: dict[str, str] = kwargs.get('reward_modifiers', {
             'goal_reached': '1000',
             'hit_wall': '-100',
             'revisit_optimal_path': '-10',
@@ -28,7 +28,7 @@ class RewardConfig:
         self.use_potential_shaping: bool = kwargs.get('use_potential_shaping', False)
         self.progress_scale: float = kwargs.get('progress_scale', 5.0)
 
-    def update_from_dict(self, config_dict):
+    def update_from_dict(self, config_dict: dict[str, Any]) -> None:
         """
         Update the attributes of RewardConfig from a dictionary.
         """
@@ -38,15 +38,18 @@ class RewardConfig:
                 # Also update the corresponding reward modifier if applicable
                 if key in self.reward_modifiers:
                     self.reward_modifiers[key] = str(value)
+
+    def get_modifier(self, key: str, default: str = "0") -> str:
+        return self.reward_modifiers.get(key, default)
 class MazeSensors:
     """Minimal sensor interface used by RewardSystem.
 
     Provides goal line-of-sight using only the maze grid.
     """
-    def __init__(self, maze):
+    def __init__(self, maze: Any) -> None:
         self.maze = maze
 
-    def goal_in_sight(self, pos: Tuple[int, int]) -> int:
+    def goal_in_sight(self, pos: tuple[int, int]) -> int:
         directions = [(1, 0), (-1, 0), (0, 1), (0, -1)]
         for dx, dy in directions:
             cy, cx = pos
@@ -62,7 +65,7 @@ class MazeSensors:
 
 
 class RewardSystem:
-    def __init__(self, maze, reward_config, sensors: MazeSensors | None = None):
+    def __init__(self, maze: Any, reward_config: RewardConfig, sensors: MazeSensors | None = None) -> None:
         self.maze = maze
         self.reward_config = reward_config
         self.cumulative_reward = 0
@@ -93,31 +96,43 @@ class RewardSystem:
             # Fallback to zero on invalid input
             return 0.0
 
-    def _eval_ast(self, node) -> float:
-        import operator as op
-        ops = {
-            ast.Add: op.add,
-            ast.Sub: op.sub,
-            ast.Mult: op.mul,
-            ast.Div: op.truediv,
-            ast.FloorDiv: op.floordiv,
-            ast.Mod: op.mod,
-            ast.USub: op.neg,
-            ast.UAdd: op.pos,
+    def _eval_ast(self, node: Any) -> float:
+        bin_ops: dict[type[Any], Callable[[float, float], float]] = {
+            ast.Add: lambda a, b: a + b,
+            ast.Sub: lambda a, b: a - b,
+            ast.Mult: lambda a, b: a * b,
+            ast.Div: lambda a, b: a / b,
+            ast.FloorDiv: lambda a, b: a // b,
+            ast.Mod: lambda a, b: a % b,
         }
-        if isinstance(node, ast.Num):  # py<3.8
-            return float(node.n)
+        unary_ops: dict[type[Any], Callable[[float], float]] = {
+            ast.USub: lambda a: -a,
+            ast.UAdd: lambda a: +a,
+        }
         if isinstance(node, ast.Constant):  # py>=3.8
             if isinstance(node.value, (int, float)):
                 return float(node.value)
             raise ValueError("Non-numeric constant")
-        if isinstance(node, ast.UnaryOp) and type(node.op) in ops:
-            return ops[type(node.op)](self._eval_ast(node.operand))
-        if isinstance(node, ast.BinOp) and type(node.op) in ops:
-            return ops[type(node.op)](self._eval_ast(node.left), self._eval_ast(node.right))
+        if isinstance(node, ast.UnaryOp):
+            fn = unary_ops.get(type(node.op))
+            if fn is None:
+                raise ValueError("Unsupported unary operator")
+            return fn(self._eval_ast(node.operand))
+        if isinstance(node, ast.BinOp):
+            fn2 = bin_ops.get(type(node.op))
+            if fn2 is None:
+                raise ValueError("Unsupported binary operator")
+            return fn2(self._eval_ast(node.left), self._eval_ast(node.right))
         raise ValueError("Unsupported expression")
 
-    def get_reward(self, prev_position: Tuple[int, int], new_position: Tuple[int, int], optimal_path: list, optimal_length: int, visited_positions: Dict[Tuple[int, int], int]) -> int:
+    def get_reward(
+        self,
+        prev_position: tuple[int, int],
+        new_position: tuple[int, int],
+        optimal_path: list[tuple[int, int]],
+        optimal_length: int,
+        visited_positions: dict[tuple[int, int], int],
+    ) -> float:
         """
         Calculate the reward for moving to a new position.
         
@@ -162,7 +177,7 @@ class RewardSystem:
         # Potential-based shaping: reward progress toward goal (distance reduction)
         if self.reward_config.use_potential_shaping:
             # Manhattan distance tends to be stable in grid mazes
-            def manhattan(a: Tuple[int,int], b: Tuple[int,int]) -> int:
+            def manhattan(a: tuple[int, int], b: tuple[int, int]) -> int:
                 return abs(a[0]-b[0]) + abs(a[1]-b[1])
             prev_d = manhattan(prev_position, self.maze.end)
             new_d = manhattan(new_position, self.maze.end)

@@ -1,6 +1,9 @@
+from __future__ import annotations
+
 import os
 import pickle
 import tempfile
+from typing import Any, cast
 
 from BotConfigs import QLearningConfig
 from RewardSystem import RewardConfig
@@ -9,7 +12,15 @@ from BotStatistics import BotStatistics
 
 
 class BotProfile:
-    def __init__(self, name, bot_type, config, reward_config, statistics, bot_specific_data):
+    def __init__(
+        self,
+        name: str,
+        bot_type: str,
+        config: QLearningConfig,
+        reward_config: RewardConfig,
+        statistics: BotStatistics,
+        bot_specific_data: dict[str, Any],
+    ) -> None:
         """
         Initialize the BotProfile with the provided parameters.
 
@@ -27,7 +38,7 @@ class BotProfile:
         self.statistics = statistics
         self.bot_specific_data = bot_specific_data
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         """
         Convert the profile to a dictionary.
 
@@ -46,7 +57,7 @@ class BotProfile:
         }
     
     @staticmethod
-    def from_dict(data, default_name=None):
+    def from_dict(data: Any, default_name: str | None = None) -> BotProfile:
         """
         Create a BotProfile instance from a dictionary.
 
@@ -59,16 +70,16 @@ class BotProfile:
 
         # Infer bot type if missing
         bot_type = d.get('bot_type')
-        cfg_dict = d.get('config') or {}
+        cfg_raw = d.get('config')
+        cfg_dict: dict[str, Any] = cast(dict[str, Any], cfg_raw) if isinstance(cfg_raw, dict) else {}
         if bot_type is None:
             bot_type = 'QLearningBot'
 
         # Build config safely with only known keys
         config_class = QLearningConfig
         allowed = {'learning_rate','discount_factor','use_position_in_state'}
-        cfg_kwargs = {}
-        if isinstance(cfg_dict, dict):
-            cfg_kwargs = {k: v for k, v in cfg_dict.items() if k in allowed}
+        cfg_kwargs: dict[str, Any] = {}
+        cfg_kwargs = {str(k): v for k, v in cfg_dict.items() if str(k) in allowed}
         try:
             config = config_class(**cfg_kwargs)
         except TypeError:
@@ -77,7 +88,7 @@ class BotProfile:
         # Reward config
         reward_config = d.get('reward_config')
         if isinstance(reward_config, dict):
-            reward_config = RewardConfig(**reward_config)
+            reward_config = RewardConfig(**cast(dict[str, Any], reward_config))
         elif not isinstance(reward_config, RewardConfig):
             reward_config = RewardConfig()
 
@@ -86,14 +97,17 @@ class BotProfile:
         if isinstance(statistics, dict):
             s = BotStatistics()
             try:
-                s.__dict__.update(statistics)
+                s.__dict__.update(cast(dict[str, Any], statistics))
             except Exception:
                 pass
             statistics = s
         elif not isinstance(statistics, BotStatistics):
             statistics = BotStatistics()
 
-        bot_specific_data = d.get('bot_specific_data') or {}
+        raw_specific = d.get('bot_specific_data')
+        bot_specific_data: dict[str, Any] = (
+            cast(dict[str, Any], raw_specific) if isinstance(raw_specific, dict) else {}
+        )
 
         return BotProfile(
             name=name,
@@ -105,7 +119,7 @@ class BotProfile:
         )
 
 class ProfileManager:
-    def __init__(self, profile_directory):
+    def __init__(self, profile_directory: str) -> None:
         """
         Initialize the ProfileManager with a directory for storing profiles.
 
@@ -113,7 +127,7 @@ class ProfileManager:
         """
         self.profile_directory = profile_directory
 
-    def save_profile(self, profile):
+    def save_profile(self, profile: BotProfile) -> None:
         """
         Save a profile to a pickle file and create necessary files.
 
@@ -137,7 +151,7 @@ class ProfileManager:
         self._create_empty_file(os.path.join(profile_dir, "HeatmapData.txt"))
 
 
-    def load_profile(self, profile_name):
+    def load_profile(self, profile_name: str) -> BotProfile:
         """
         Load a profile from a pickle file.
 
@@ -157,7 +171,7 @@ class ProfileManager:
                 data = pickle.load(f)
         return BotProfile.from_dict(data, default_name=profile_name)
     
-    def list_profiles(self):
+    def list_profiles(self) -> list[str]:
         """
         List all available profiles.
 
@@ -166,7 +180,7 @@ class ProfileManager:
         return [d for d in os.listdir(self.profile_directory) if os.path.isdir(os.path.join(self.profile_directory, d))]
 
     @staticmethod
-    def _create_empty_file(filepath):
+    def _create_empty_file(filepath: str) -> None:
         """
         Create a empty file if it doesn't exist.
 

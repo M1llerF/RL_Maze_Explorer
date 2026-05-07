@@ -1,9 +1,8 @@
 from BotFactory import BotFactory
 from Maze import Maze
-from RewardSystem import RewardConfig
 from BotStatistics import BotStatistics
 from BotProfile import BotProfile, ProfileManager
-from typing import Any, List, Optional
+from typing import Any, Optional, cast
 import threading
 import time
 from services.repository import ArtifactsRepository
@@ -27,24 +26,24 @@ class GameEnvironment:
         self.repository = ArtifactsRepository(profile_directory)
         self.bot_factory = BotFactory(self.maze, repository=self.repository)
         self.profile_manager = ProfileManager(profile_directory)
-        self.bots: List = []
+        self.bots: list[Any] = []
         self.register_bots()
         # Training pause control per profile
         self._pause_lock = threading.Lock()
-        self._paused_profiles = set()
+        self._paused_profiles: set[str] = set()
         # Episode completion tracking per profile (used by training UI)
         self._completed_lock = threading.Lock()
         self._completed_episodes: dict[str, int] = {}
         # Training maze pool (fixed MDP per phase)
         self.training_pool_active: bool = False
-        self.training_pool: List[dict] = []
+        self.training_pool: list[dict[str, Any]] = []
         self.training_pool_index: int = 0
         # Optional fixed custom maze (overrides random/pool when active)
         self.fixed_maze_active: bool = False
-        self.fixed_maze_state: Optional[dict] = None
+        self.fixed_maze_state: Optional[dict[str, Any]] = None
 
     # ----- Fixed custom maze controls ----
-    def set_fixed_maze(self, state: dict) -> None:
+    def set_fixed_maze(self, state: dict[str, Any]) -> None:
         """Enable and set a fixed custom maze state to use on each reset."""
         self.fixed_maze_state = state
         self.fixed_maze_active = True
@@ -85,7 +84,7 @@ class GameEnvironment:
         with self._completed_lock:
             return self._completed_episodes.get(profile_name, 0)
 
-    def register_bots(self):
+    def register_bots(self) -> None:
         """
         Register available bots with the bot factory.
         """
@@ -95,7 +94,7 @@ class GameEnvironment:
         # self.bot_factory.register_bot('AnotherBot', AnotherBot)
         # Additional bots can be registered here
         
-    def setup_new_profile(self, profile_name: str, bot_type: str, config, reward_config):
+    def setup_new_profile(self, profile_name: str, bot_type: str, config: Any, reward_config: Any) -> None:
         """
         Set up a new bot profile and save it.
 
@@ -114,7 +113,7 @@ class GameEnvironment:
             # Ignore bot creation failures during profile setup so profiles can still be created
             pass
 
-    def game_loop(self, rounds: int, bot_index: int, visualize: bool = False, visualization_window: Optional[Any] = None):
+    def game_loop(self, rounds: int, bot_index: int, visualize: bool = False, visualization_window: Optional[Any] = None) -> None:
         """
         Run the game loop for a specified number of rounds.
 
@@ -146,7 +145,7 @@ class GameEnvironment:
         # Pool overrides any fixed maze selection
         self.fixed_maze_active = False
 
-    def reset_environment(self, bot_index: int):
+    def reset_environment(self, bot_index: int) -> None:
         """
         Reset the environment for the specified bot.
 
@@ -157,16 +156,16 @@ class GameEnvironment:
         if self._is_paused(bot.profile_name):
             # Visualization is active for this profile
             if self.fixed_maze_active and self.fixed_maze_state is not None:
-                self.maze.set_state(self.fixed_maze_state)
+                cast(Any, self.maze).set_state(self.fixed_maze_state)
             else:
                 self.maze.setup_simple_maze()
         elif self.training_pool_active and self.training_pool:
             state = self.training_pool[self.training_pool_index]
-            self.maze.set_state(state)
+            cast(Any, self.maze).set_state(state)
             self.training_pool_index = (self.training_pool_index + 1) % len(self.training_pool)
         else:
             if self.fixed_maze_active and self.fixed_maze_state is not None:
-                self.maze.set_state(self.fixed_maze_state)
+                cast(Any, self.maze).set_state(self.fixed_maze_state)
             else:
                 self.maze.setup_simple_maze()
         for bot in self.bots:
@@ -179,7 +178,7 @@ class GameEnvironment:
                     if hasattr(bot, 'reset_bot'):
                         bot.reset_bot()
 
-    def load_profile(self, profile_name: str):
+    def load_profile(self, profile_name: str) -> None:
         """
         Load a bot profile from the profile manager.
 
@@ -188,7 +187,7 @@ class GameEnvironment:
         profile = self.profile_manager.load_profile(profile_name)
         self.apply_profile(profile)
 
-    def apply_profile(self, profile) -> int:
+    def apply_profile(self, profile: BotProfile) -> int:
         """
         Apply a loaded profile to the environment.
 
@@ -218,7 +217,15 @@ class GameEnvironment:
 
         return bot_index
 
-    def setup_bots(self, bot_type: str, bot_name: str, config, reward_config, statistics, bot_specific_data):
+    def setup_bots(
+        self,
+        bot_type: str,
+        bot_name: str,
+        config: Any,
+        reward_config: Any,
+        statistics: Any,
+        bot_specific_data: dict[str, Any],
+    ) -> None:
         """
         Set up bots and add them to the environment.
 
@@ -231,7 +238,7 @@ class GameEnvironment:
         """
         self.bots.append(self.bot_factory.create_bot(bot_type, bot_name, config, reward_config, statistics, bot_specific_data))
 
-    def save_profiles(self):
+    def save_profiles(self) -> None:
         """
         Save all bot profiles to the profile manager.
         """
