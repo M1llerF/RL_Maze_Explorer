@@ -1,16 +1,15 @@
-import json
-import os
+# pyright: reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownParameterType=false, reportMissingParameterType=false
 import tkinter as tk
 from tkinter import ttk, messagebox
+from typing import Any, cast
 
 from BotConfigs import bot_configs, QLearningConfig
 from RewardSystem import RewardConfig
-from BotStatistics import BotStatistics
 from BotProfile import BotProfile
 
 
 class CreateEditProfileFrame(tk.Frame):
-    def __init__(self, parent, controller):
+    def __init__(self, parent: Any, controller: Any) -> None:
         super().__init__(parent)
         self.controller = controller
         self.current_config_widgets = []
@@ -19,6 +18,7 @@ class CreateEditProfileFrame(tk.Frame):
         self.auto_vars = {}
         self.param_entries = {}
         self.reward_entries = {}
+        self.profile: BotProfile | None = None
         try:
             self._style = ttk.Style()
             self._style.configure("Error.TEntry", fieldbackground="#ffecec")
@@ -43,7 +43,7 @@ class CreateEditProfileFrame(tk.Frame):
         ttk.Button(self, text="Cancel", command=self.cancel).pack(pady=10)
 
     # ----- UI building -----
-    def update_bot_config_ui(self, event=None):
+    def update_bot_config_ui(self, event: Any = None) -> None:
         for widget in self.current_config_widgets:
             widget.destroy()
         self.current_config_widgets.clear()
@@ -87,7 +87,7 @@ class CreateEditProfileFrame(tk.Frame):
                 self.reward_entries[reward_key] = reward_entry
 
     # ----- Data binding -----
-    def load_profile(self, profile=None):
+    def load_profile(self, profile: Any = None) -> None:
         self.profile = profile
         if profile:
             self.profile_name_entry.delete(0, tk.END)
@@ -105,7 +105,7 @@ class CreateEditProfileFrame(tk.Frame):
                     var.set(profile.reward_config.reward_modifiers.get(reward_key, ""))
 
     # ----- Actions -----
-    def save_profile(self):
+    def save_profile(self) -> None:
         profile_name = self.profile_name_entry.get()
         bot_type = self.bot_type_entry.get()
 
@@ -138,7 +138,6 @@ class CreateEditProfileFrame(tk.Frame):
             except Exception:
                 pass
 
-        config = bot_configs[bot_type]
         bot_params = {}
         param_errors = []
         for param_key, var in self.param_vars.items():
@@ -187,26 +186,15 @@ class CreateEditProfileFrame(tk.Frame):
         if bot_type == "QLearningBot":
             q_defaults = QLearningConfig()
             bot_config = QLearningConfig(
-                learning_rate=(bot_params.get('learning_rate') if bot_params.get('learning_rate') is not None else q_defaults.learning_rate),
-                discount_factor=(bot_params.get('discount_factor') if bot_params.get('discount_factor') is not None else q_defaults.discount_factor),
+                learning_rate=cast(float, bot_params.get('learning_rate') if bot_params.get('learning_rate') is not None else q_defaults.learning_rate),
+                discount_factor=cast(float, bot_params.get('discount_factor') if bot_params.get('discount_factor') is not None else q_defaults.discount_factor),
                 use_position_in_state=bool(getattr(q_defaults, 'use_position_in_state', True))
             )
         else:
-            bot_config = None
+            bot_config = QLearningConfig()
 
         reward_config_obj = RewardConfig()
         reward_config_obj.reward_modifiers.update(rewards_config)
-
-        bot_specific_data = {}
-
-        profile = BotProfile(
-            name=profile_name,
-            bot_type=bot_type,
-            config=bot_config,
-            reward_config=reward_config_obj,
-            statistics=BotStatistics(),
-            bot_specific_data=bot_specific_data
-        )
 
         try:
             self.controller.game_env.setup_new_profile(profile_name, bot_type, bot_config, reward_config_obj)
@@ -227,5 +215,5 @@ class CreateEditProfileFrame(tk.Frame):
         self.controller.frames["BotTrainingFrame"].load_profiles()
         self.controller.show_profile_management()
 
-    def cancel(self):
+    def cancel(self) -> None:
         self.controller.show_profile_management()

@@ -3,16 +3,16 @@ from typing import Any
 
 class VisualizationStrategy(ABC):
     @abstractmethod
-    def visualize(self, frame: Any, bot: Any, profile_index: int):
+    def visualize(self, frame: Any, bot: Any, profile_index: int) -> None:
         pass
 
 class QLearningBotVisualizationStrategy(VisualizationStrategy):
-    def visualize(self, frame, bot, profile_index):
+    def visualize(self, frame: Any, bot: Any, profile_index: int) -> None:
         selected_profile = frame.profile_select.get()
         # Load via centralized repository on the bot
         try:
             repo = getattr(bot, 'repo', None)
-            maze_data = repo.load_maze_data(selected_profile) if repo else {}
+            maze_data: dict[str, Any] = repo.load_maze_data(selected_profile) if repo else {}
         except Exception:
             maze_data = {}
 

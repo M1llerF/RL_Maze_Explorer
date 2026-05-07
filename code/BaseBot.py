@@ -1,3 +1,8 @@
+from __future__ import annotations
+
+from typing import Any
+
+
 class BaseBot:
     """
     Base lifecycle contract for training and visualization.
@@ -13,7 +18,7 @@ class BaseBot:
     - Bots can expose step-wise visualization methods, but these must not
       mutate durable training artifacts.
     """
-    def __init__(self, maze, statistics, config=None):
+    def __init__(self, maze: Any, statistics: Any, config: Any = None) -> None:
         """
         Initialize the base bot.
 
@@ -27,15 +32,15 @@ class BaseBot:
         # Cooperative stop flag to abort long episodes promptly
         self._stop_requested = False
     
-    def reset(self):
+    def reset(self) -> None:
         """Reset the bot's state and statistics. Should be implemented by subclasses."""
         raise NotImplementedError("This method should be implemented by subclasses.")
 
-    def calculate_state(self):
+    def calculate_state(self) -> Any:
         """Calculate the current state of the bot. Should be implemented by subclasses."""
         raise NotImplementedError("This method should be implemented by subclasses.")
 
-    def run_episode(self):
+    def run_episode(self) -> None:
         """Run a single episode of the bot's operation. Should be implemented by subclasses."""
         raise NotImplementedError("This method should be implemented by subclasses.")
 
@@ -67,8 +72,8 @@ class BaseBot:
         raise NotImplementedError("This method should be implemented by subclasses.")
 
     # Cooperative stop handling
-    def request_stop(self):
+    def request_stop(self) -> None:
         self._stop_requested = True
 
-    def clear_stop(self):
+    def clear_stop(self) -> None:
         self._stop_requested = False

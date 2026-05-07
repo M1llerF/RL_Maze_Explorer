@@ -95,6 +95,23 @@ Use `--create` to create a profile first (QLearningBot only):
 python code/DebugCLI.py --profile TEST --create --episodes 10
 ```
 
+## Type Checking
+
+Run strict typing checks with Pyright from the project virtual environment:
+
+```bash
+./.venv/Scripts/pyright.exe
+```
+
+If Pyright is not installed in the environment yet:
+
+```bash
+python -m pip install pyright
+./.venv/Scripts/pyright.exe
+```
+
+CI should use the same command (`.venv/Scripts/pyright.exe`) so local and CI reports stay aligned.
+
 ## Notes
 
 Folders `profiles/` and `mazes/` are created automatically at runtime. They are git-ignored by default. This project is a learning exercise in reinforcement learning and AI-driven UI applications.

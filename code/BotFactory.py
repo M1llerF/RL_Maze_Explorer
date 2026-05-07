@@ -1,18 +1,27 @@
+from __future__ import annotations
+
+from typing import Any, Protocol
+
 from RewardSystem import RewardSystem, MazeSensors
 from services.repository import ArtifactsRepository
 
+
+class BotProtocol(Protocol):
+    def initialize_specific_data(self, data: dict[str, Any]) -> None: ...
+
+
 class BotFactory:
-    def __init__(self, maze, repository: ArtifactsRepository | None = None):
+    def __init__(self, maze: Any, repository: ArtifactsRepository | None = None) -> None:
         """
         Initialize the BotFactory with a given maze.
         
         :param maze: The maze instance that the bots will navigate.
         """
         self.maze = maze
-        self.bot_registry = {}
+        self.bot_registry: dict[str, Any] = {}
         self.repository = repository or ArtifactsRepository()
 
-    def register_bot(self, bot_type, bot_class):
+    def register_bot(self, bot_type: str, bot_class: Any) -> None:
         """
         Register a new bot type with its corresponding class.
 
@@ -21,7 +30,15 @@ class BotFactory:
         """
         self.bot_registry[bot_type] = bot_class
 
-    def create_bot(self, bot_type, profile_name, config, reward_config, statistics, bot_specific_data):
+    def create_bot(
+        self,
+        bot_type: str,
+        profile_name: str,
+        config: Any,
+        reward_config: Any,
+        statistics: Any,
+        bot_specific_data: dict[str, Any],
+    ) -> Any:
         """
         Create a instance of the specified bot type.
 

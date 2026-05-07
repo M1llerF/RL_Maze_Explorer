@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import threading
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
-from BotProfile import BotProfile
 from GameEnvironment import GameEnvironment
 
 
@@ -96,7 +95,7 @@ class TrainingController:
             # Load/apply profile & prepare bot
             try:
                 profile = self._env.profile_manager.load_profile(profile_name)
-                self._bot_index = self._env.apply_profile(profile)
+                self._bot_index = int(self._env.apply_profile(profile))
                 # Clear previous completed count
                 self._env.reset_completed(profile.name)
                 # Clear stop flags on the bot if present
@@ -118,7 +117,10 @@ class TrainingController:
                             break
                         # Run a single episode for the selected bot
                         try:
-                            bot = self._env.bots[self._bot_index]
+                            idx = self._bot_index
+                            if idx is None:
+                                raise RuntimeError("Bot index not set")
+                            bot: Any = self._env.bots[idx]
                         except Exception as exc:
                             raise RuntimeError("Bot not available") from exc
 
@@ -132,7 +134,10 @@ class TrainingController:
                             break
 
                         bot.run_episode()
-                        self._env.reset_environment(self._bot_index)
+                        idx2 = self._bot_index
+                        if idx2 is None:
+                            raise RuntimeError("Bot index not set")
+                        self._env.reset_environment(idx2)
                         self._env.inc_completed(bot.profile_name)
                         if on_progress:
                             try:

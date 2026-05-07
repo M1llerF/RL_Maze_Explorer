@@ -1,6 +1,7 @@
-import pickle
+# pyright: reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownParameterType=false, reportMissingParameterType=false, reportUnknownLambdaType=false
 import tkinter as tk
 from tkinter import ttk, messagebox
+from typing import Any
 
 import matplotlib.colors as mcolors
 from matplotlib import pyplot as plt
@@ -12,7 +13,7 @@ from VisualizationStrategy import QLearningBotVisualizationStrategy
 
 
 class VisualizationWindow(tk.Toplevel):
-    def __init__(self, parent, game_env, profile_name, profile_index):
+    def __init__(self, parent: Any, game_env: Any, profile_name: str, profile_index: int) -> None:
         super().__init__(parent)
         self.game_env = game_env
         self.profile_name = profile_name
@@ -48,7 +49,7 @@ class VisualizationWindow(tk.Toplevel):
 
         self.update_visualization()
 
-    def update_visualization(self):
+    def update_visualization(self) -> None:
         if not self.visualize:
             return
         self.canvas.delete("all")
@@ -64,11 +65,11 @@ class VisualizationWindow(tk.Toplevel):
         self.display_with_bot_and_heatmap(bot_position, bot.statistics.get_visited_positions())
         self.after_id = self.after(100, self.update_visualization)
 
-    def toggle_pause(self):
+    def toggle_pause(self) -> None:
         self.paused = not self.paused
         self.pause_btn.configure(text="Resume" if self.paused else "Pause")
 
-    def display_with_bot(self, bot_position):
+    def display_with_bot(self, bot_position: tuple[int, int]) -> None:
         maze = self.game_env.maze
         cell_width = self.canvas.winfo_width() / maze.width
         cell_height = self.canvas.winfo_height() / maze.height
@@ -90,7 +91,7 @@ class VisualizationWindow(tk.Toplevel):
                                 (bot_position[1] + 1) * cell_width, (bot_position[0] + 1) * cell_height,
                                 fill="red")
 
-    def display_with_bot_and_heatmap(self, bot_position, visited_positions):
+    def display_with_bot_and_heatmap(self, bot_position: tuple[int, int], visited_positions: dict[tuple[int, int], int]) -> None:
         maze = self.game_env.maze
         cell_width = self.canvas.winfo_width() / maze.width
         cell_height = self.canvas.winfo_height() / maze.height
@@ -98,7 +99,7 @@ class VisualizationWindow(tk.Toplevel):
         for (x, y), count in visited_positions.items():
             heatmap[x, y] = count
         max_heat = heatmap.max() if heatmap.max() > 0 else 1
-        cmap = plt.cm.Reds
+        cmap = plt.get_cmap("Reds")
         for y in range(maze.height):
             for x in range(maze.width):
                 if maze.grid[y][x] == 1:
@@ -124,7 +125,7 @@ class VisualizationWindow(tk.Toplevel):
                                 (bot_position[1] + 1) * cell_width, (bot_position[0] + 1) * cell_height,
                                 fill="red")
 
-    def on_close(self):
+    def on_close(self) -> None:
         self.visualize = False
         if self.after_id is not None:
             self.after_cancel(self.after_id)
@@ -142,13 +143,13 @@ class VisualizationWindow(tk.Toplevel):
 
 
 class VisualizationFrame(tk.Frame):
-    def __init__(self, parent, controller):
+    def __init__(self, parent: Any, controller: Any) -> None:
         super().__init__(parent)
         self.controller = controller
         self.visualization_strategies = {
             'QLearningBot': QLearningBotVisualizationStrategy(),
         }
-        self.canvas_agg = None
+        self.canvas_agg: Any = None
 
         ttk.Label(self, text="Visualizations", font=("TkDefaultFont", 20)).pack(pady=10, padx=10)
         self.canvas = tk.Canvas(self, height=600, width=1000)
@@ -160,7 +161,7 @@ class VisualizationFrame(tk.Frame):
         self.scrollable_frame.bind("<Configure>", self.on_frame_configure)
         self.canvas.configure(yscrollcommand=self.scrollbar.set)
 
-        def _wheel_scroll(event):
+        def _wheel_scroll(event: Any) -> str:
             units = -1 if getattr(event, 'delta', 0) > 0 or getattr(event, 'num', None) == 4 else 1
             try:
                 self.canvas.yview_scroll(units, 'units')
@@ -201,14 +202,14 @@ class VisualizationFrame(tk.Frame):
         self.statistics_output.pack(pady=10)
         self.load_profiles()
 
-    def on_frame_configure(self, event):
+    def on_frame_configure(self, event: Any) -> None:
         self.canvas.configure(scrollregion=self.canvas.bbox("all"))
 
-    def load_profiles(self):
+    def load_profiles(self) -> None:
         profiles = self.controller.game_env.profile_manager.list_profiles()
         self.profile_select['values'] = profiles
 
-    def load_profile(self):
+    def load_profile(self) -> None:
         selected_profile = self.profile_select.get()
         if not selected_profile:
             messagebox.showerror("Error", "No profile selected.")
@@ -220,20 +221,20 @@ class VisualizationFrame(tk.Frame):
         if strategy:
             strategy.visualize(self, bot, profile_index)
 
-    def display_heatmap(self, canvas, maze, start, end, heatmap_data):
+    def display_heatmap(self, canvas: Any, maze: Any, start: Any, end: Any, heatmap_data: Any) -> None:
         try:
             DisplayTools.display_heatmap(canvas, maze, start, end, heatmap_data)
         except Exception:
             pass
 
-    def display_qtable(self, bot, profile_index):
+    def display_qtable(self, bot: Any, profile_index: int) -> None:
         self.qtable_output.delete("1.0", tk.END)
         if hasattr(bot, 'q_learning') and hasattr(bot.q_learning, 'q_table'):
             top_values = self.get_top_q_values(bot, profile_index)
             self.qtable_output.insert(tk.END, "Top Q-Table Values:\n")
             for i, (q_value, (state, actions)) in enumerate(top_values):
                 position, surrounding, step_count = state
-                best_action_index = np.argmax(actions)
+                best_action_index = int(np.argmax(actions))
                 best_action = self.get_action_label(best_action_index)
                 best_q_value = q_value
                 self.qtable_output.insert(tk.END, f"Rank {i+1}:\n")
@@ -245,7 +246,7 @@ class VisualizationFrame(tk.Frame):
         else:
             self.qtable_output.insert(tk.END, "No tabular Q-table available for this bot.\n")
 
-    def display_statistics(self, bot, profile_index):
+    def display_statistics(self, bot: Any, profile_index: int) -> None:
         self.statistics_output.delete("1.0", tk.END)
         try:
             repo = self.controller.game_env.repository
@@ -257,7 +258,7 @@ class VisualizationFrame(tk.Frame):
         self.statistics_output.insert(tk.END, f"Times Revisited Squares: {profile_data.get('times_revisited_squares', 0)}\n")
         self.statistics_output.insert(tk.END, f"Times Bot Hit Wall: {profile_data.get('times_hit_wall', 0)}\n")
 
-    def display_reward_graph(self, bot):
+    def display_reward_graph(self, bot: Any) -> None:
         if self.canvas_agg:
             self.canvas_agg.get_tk_widget().destroy()
         try:
@@ -268,7 +269,7 @@ class VisualizationFrame(tk.Frame):
         grapher = RewardGrapher(reward_filenames)
         self.canvas_agg = grapher.run(self.reward_canvas)
 
-    def get_top_q_values(self, bot, profile_index, n=10):
+    def get_top_q_values(self, bot: Any, profile_index: int, n: int = 10) -> list[Any]:
         q_table = bot.q_learning.q_table
         q_table_items = list(q_table.items())
         top_items = []
@@ -276,13 +277,13 @@ class VisualizationFrame(tk.Frame):
             q_value = np.max(item[1])
             if len(top_items) < n:
                 top_items.append((q_value, item))
-                top_items.sort(reverse=True, key=lambda x: x[0])
+                top_items.sort(reverse=True, key=lambda item: item[0])
             else:
                 if q_value > top_items[-1][0]:
                     top_items[-1] = (q_value, item)
-                    top_items.sort(reverse=True, key=lambda x: x[0])
+                    top_items.sort(reverse=True, key=lambda item: item[0])
         return top_items
 
-    def get_action_label(self, action_index):
+    def get_action_label(self, action_index: int) -> str:
         action_labels = ["Up", "Down", "Left", "Right"]
         return action_labels[action_index]

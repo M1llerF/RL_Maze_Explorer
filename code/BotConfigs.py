@@ -1,7 +1,15 @@
 # bot_configs.py
+from __future__ import annotations
+
+from typing import Any
 
 class QLearningConfig:
-    def __init__(self, learning_rate=0.1, discount_factor=0.9, use_position_in_state=True):
+    def __init__(
+        self,
+        learning_rate: float = 0.1,
+        discount_factor: float = 0.9,
+        use_position_in_state: bool = True,
+    ) -> None:
         """
         Initialize Q-learning configuration with default learning rate and discount factor.
         """
@@ -10,7 +18,7 @@ class QLearningConfig:
         # If False, the Q-state key excludes absolute position, aiding generalization across mazes
         self.use_position_in_state = use_position_in_state
 
-    def customize(self):
+    def customize(self) -> None:
         """
         Customize Q-learning parameters via user input.
         Prompts the user to enter new values for learning rate and discount factor.
@@ -20,7 +28,7 @@ class QLearningConfig:
         self.discount_factor = self._get_float_input("Enter discount factor (default 0.9): ", self.discount_factor)
 
     @staticmethod
-    def _get_float_input(prompt, default):
+    def _get_float_input(prompt: str, default: float) -> float:
         """
         Helper method to get a float input from the user.
         If the input is invalid or left blank, the default value is returned.
@@ -36,7 +44,7 @@ class QLearningConfig:
             return default
 
 # Define configurations for different bot types
-bot_configs = {
+bot_configs: dict[str, dict[str, Any]] = {
     "QLearningBot": {
         "class": QLearningConfig,
         "params": {

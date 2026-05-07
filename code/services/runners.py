@@ -33,7 +33,7 @@ class QLearningEpisodeRunner:
             area_bonus = int(0.5 * maze.width * maze.height)
             step_limit = (min(5000, max(200, 12 * optimal_length + area_bonus)) if optimal_length > 0 else max(200, area_bonus))
 
-            def manhattan(a, b):
+            def manhattan(a: tuple[int, int], b: tuple[int, int]) -> int:
                 return abs(a[0] - b[0]) + abs(a[1] - b[1])
 
             bot.total_reward = 0

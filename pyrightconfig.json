@@ -1,0 +1,14 @@
+{
+  "include": [
+    "code",
+    "tests"
+  ],
+  "exclude": [
+    "code/DetermineBotFunctionality", "**/node_modules", "**/__pycache__", "**/.*", ".venv"
+  ],
+  "typeCheckingMode": "strict",
+  "reportMissingTypeStubs": "none",
+  "extraPaths": [
+    "./code"
+  ]
+}

@@ -1,7 +1,12 @@
 import numpy as np
 import random
+from typing import Any
+
+
+MazeState = dict[str, Any]
+
 class Maze:
-    def __init__(self, width, height, start=None, end=None):
+    def __init__(self, width: int, height: int, start: tuple[int, int] | None = None, end: tuple[int, int] | None = None):
         """
         Initialize the maze with given dimensions and optionally set start and end points.
         """
@@ -15,14 +20,14 @@ class Maze:
         # Do not create a matplotlib figure here; the app uses Tk canvas.
         # Leaving interactive figure creation disabled prevents stray empty windows.
     
-    def is_valid_position(self, bot_name, x, y):
+    def is_valid_position(self, bot_name: str | None, x: int, y: int) -> bool:
         """
         Check if a position is valid (within bounds and not a wall).
         Pure check: no side effects.
         """
         return 0 <= x < self.height and 0 <= y < self.width and self.grid[x][y] == 0
 
-    def set_wall(self, x, y):
+    def set_wall(self, x: int, y: int) -> None:
         """
         Set a wall at the specified position.
         Raise a error if the position is out of bounds.
@@ -32,19 +37,21 @@ class Maze:
         else:
             raise ValueError("Position out of maze bounds")
     
-    def get_start(self):
+    def get_start(self) -> tuple[int, int]:
         """
         Get the start position of the maze.
         """
+        if self.start is None:
+            raise ValueError("Maze start is not set")
         return self.start
     
-    def set_start(self, x, y):
+    def set_start(self, x: int, y: int) -> None:
         if self.is_valid_position(None, x, y):
             self.start = (x, y)
         else:
             raise ValueError("Invalid start position")
     
-    def set_goal(self, x, y):
+    def set_goal(self, x: int, y: int) -> None:
         """
         Set the goal position of the maze if it's valid.
         Raise a error if the position is invalid.
@@ -54,7 +61,7 @@ class Maze:
         else:
             raise ValueError("Invalid goal position")
         
-    def setup_simple_maze(self):
+    def setup_simple_maze(self) -> None:
         # Randomly adjust width and height
         # self.width = random.randint(self.width, self.width + 2)
         # self.height = random.randint(self.height, self.height + 2)
@@ -62,7 +69,7 @@ class Maze:
         # Initialize grid with walls
         self.grid = [[1 for _ in range(self.width)] for _ in range(self.height)]
 
-        def dfs_iterative(x, y, algorithm_type):
+        def dfs_iterative(x: int, y: int, algorithm_type: int) -> None:
             stack = [(x, y)]
             directions = [(1, 0), (-1, 0), (0, 1), (0, -1)]
 
@@ -98,7 +105,7 @@ class Maze:
         self.set_start(*self.start)
         self.set_goal(*self.end)
 
-    def get_state(self):
+    def get_state(self) -> MazeState:
         """Return a serializable snapshot of the current maze state."""
         return {
             'width': self.width,
@@ -108,7 +115,7 @@ class Maze:
             'end': tuple(self.end) if self.end is not None else None,
         }
 
-    def set_state(self, state):
+    def set_state(self, state: MazeState) -> None:
         """Load a snapshot produced by get_state()."""
         self.width = int(state['width'])
         self.height = int(state['height'])
@@ -116,7 +123,7 @@ class Maze:
         self.start = tuple(state['start']) if state['start'] is not None else None
         self.end = tuple(state['end']) if state['end'] is not None else None
 
-    def get_farthest_valid_end_position(self, start_positions):
+    def get_farthest_valid_end_position(self, start_positions: list[tuple[int, int]]) -> tuple[int, int]:
         """
         Get the farthest valid end position that is at least minimum_distance away from the start.
         """
@@ -127,7 +134,7 @@ class Maze:
         if valid_end_positions:
             return random.choice(valid_end_positions)
         else:
-            return max(start_positions, key=lambda pos: np.linalg.norm(np.array(pos) - np.array(self.start)))
+            return max(start_positions, key=lambda pos: float(np.linalg.norm(np.array(pos) - np.array(self.start))))
 
         
     # UI rendering is handled in UI modules (VisualizationWindow/DisplayTools).

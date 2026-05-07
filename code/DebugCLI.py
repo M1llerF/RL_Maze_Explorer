@@ -1,8 +1,7 @@
 import argparse
 import json
 import os
-import pickle
-from typing import Any, Dict, List
+from typing import Any, Dict, List, cast
 from services.repository import ArtifactsRepository
 
 from GameEnvironment import GameEnvironment
@@ -29,15 +28,18 @@ def run_profile_episodes(profile_name: str, episodes: int) -> Dict[str, Any]:
 
     Returns a dictionary with per-episode metrics and summary stats.
     """
-    env = GameEnvironment()
+    env: Any = GameEnvironment()
 
     # Load profile and create/apply bot
     profile = env.profile_manager.load_profile(profile_name)
-    bot_index = env.apply_profile(profile)
-    bot = env.bots[bot_index]
+    bot_index = int(env.apply_profile(profile))
+    bot: Any = env.bots[bot_index]
 
     # Static reference values
-    optimal_path = bot.tools.get_optimal_path_info(bot.maze.start, bot.maze.end, output="path")
+    optimal_path: list[tuple[int, int]] = cast(
+        list[tuple[int, int]],
+        bot.tools.get_optimal_path_info(bot.maze.start, bot.maze.end, output="path"),
+    )
     optimal_len = len(optimal_path)
 
     per_episode: List[Dict[str, Any]] = []
@@ -86,14 +88,18 @@ def run_profile_episodes(profile_name: str, episodes: int) -> Dict[str, Any]:
         "qtable_growth": q_sizes[-1] - q_sizes[0] if episodes > 1 else 0,
         "optimal_path_len": optimal_len,
     }
+    success_rate = float(summary["success_rate"])
+    avg_reward = float(summary["avg_reward"])
+    avg_walls_hit = float(summary["avg_walls_hit"])
+    qtable_growth = int(summary["qtable_growth"])
 
     # Simple heuristics for failure hints
     hints: List[str] = []
-    if summary["success_rate"] < 0.25 and summary["avg_reward"] < 0:
+    if success_rate < 0.25 and avg_reward < 0:
         hints.append("Low success and negative rewards: agent likely not reaching goal; consider lowering exploration decay or adjusting rewards.")
-    if summary["avg_walls_hit"] > 5:
+    if avg_walls_hit > 5:
         hints.append("High wall collisions: increase wall penalty or improve state features.")
-    if summary["qtable_growth"] <= 0 and episodes > 5:
+    if qtable_growth <= 0 and episodes > 5:
         hints.append("Q-table not growing: exploration may be too low or episodes too short.")
 
     return {"summary": summary, "per_episode": per_episode, "hints": hints}
@@ -102,7 +108,7 @@ def run_profile_episodes(profile_name: str, episodes: int) -> Dict[str, Any]:
 def create_profile(profile_name: str, bot_type: str = "QLearningBot", lr: float = 0.1, gamma: float = 0.9,
                    use_position_in_state: bool = True, potential: bool = False, progress_scale: float = 5.0) -> None:
     """Create a new profile directory with default config and reward settings."""
-    env = GameEnvironment()
+    env: Any = GameEnvironment()
 
     if bot_type != "QLearningBot":
         raise ValueError("Currently only QLearningBot is supported by this CLI.")
@@ -118,7 +124,7 @@ def create_profile(profile_name: str, bot_type: str = "QLearningBot", lr: float 
     print(f"Created profile '{profile_name}' for {bot_type} (lr={lr}, gamma={gamma}, pos_state={use_position_in_state}, potential={potential}, progress_scale={progress_scale}).")
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description="Run or create profiles for headless training and metrics.")
     parser.add_argument("--profile", required=True, help="Profile name (folder under profiles/)")
     parser.add_argument("--episodes", type=int, default=0, help="Number of episodes to run")
@@ -131,26 +137,36 @@ def main():
     parser.add_argument("--potential", action="store_true", help="Enable potential-based shaping toward goal")
     parser.add_argument("--progress-scale", type=float, default=5.0, help="Scale for shaping progress toward goal")
     args = parser.parse_args()
+    profile_arg = str(args.profile)
+    episodes_arg = int(args.episodes)
+    create_arg = bool(args.create)
+    save_json_arg = bool(args.save_json)
+    bot_arg = str(args.bot)
+    lr_arg = float(args.lr)
+    gamma_arg = float(args.gamma)
+    no_pos_arg = bool(args.no_pos)
+    potential_arg = bool(args.potential)
+    progress_scale_arg = float(args.progress_scale)
 
-    if args.create:
+    if create_arg:
         create_profile(
-            args.profile,
-            args.bot,
-            args.lr,
-            args.gamma,
-            use_position_in_state=(not args.no_pos),
-            potential=args.potential,
-            progress_scale=args.progress_scale,
+            profile_arg,
+            bot_arg,
+            lr_arg,
+            gamma_arg,
+            use_position_in_state=(not no_pos_arg),
+            potential=potential_arg,
+            progress_scale=progress_scale_arg,
         )
         # If only creating, exit early unless episodes > 0
-        if args.episodes <= 0:
+        if episodes_arg <= 0:
             return
 
-    if args.episodes <= 0:
+    if episodes_arg <= 0:
         print("No episodes requested. Use --episodes N to run training.")
         return
 
-    results = run_profile_episodes(args.profile, args.episodes)
+    results = run_profile_episodes(profile_arg, episodes_arg)
 
     summary = results["summary"]
     print("Profile:", summary["profile"]) 
@@ -175,7 +191,7 @@ def main():
         for h in results["hints"]:
             print("-", h)
 
-    if args.save_json:
+    if save_json_arg:
         out_dir = os.path.join("profiles", summary["profile"])
         os.makedirs(out_dir, exist_ok=True)
         out_path = os.path.join(out_dir, "debug_results.json")

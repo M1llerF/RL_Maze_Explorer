@@ -1,8 +1,8 @@
 from Pathfinding import Pathfinding
 import numpy as np
-from typing import Tuple, List, Union
+from typing import Any, Tuple, List, Union, cast
 class BotTools:
-    def __init__(self, maze):
+    def __init__(self, maze: Any) -> None:
         """
         Initialize the BotTools with a given maze.
 
@@ -10,7 +10,7 @@ class BotTools:
         """
         self.maze = maze
     
-    def check_goal_in_sight(self, position):
+    def check_goal_in_sight(self, position: Tuple[int, int]) -> int:
         """
         Check if the goal is in sight from the given position.
 
@@ -63,15 +63,18 @@ class BotTools:
             'Right': (0, 1),
         }
 
-        wall_distances = []
-        goal_directions = []
+        wall_distances: list[int] = []
+        goal_directions: list[int] = []
 
-        for direction, (dx, dy) in directions.items():
+        for _direction, (dx, dy) in directions.items():
             distance, goal = self._detect_wall_in_direction(position, dx, dy)
             wall_distances.append(distance)
             goal_directions.append(goal)
 
-        return tuple(wall_distances), tuple(goal_directions)
+        return (
+            cast(tuple[int, int, int, int], tuple(wall_distances)),
+            cast(tuple[int, int, int, int], tuple(goal_directions)),
+        )
     
     def _detect_wall_in_direction(self, position: Tuple[int, int], dx: int, dy: int) -> Tuple[int, int]:
         """
@@ -116,7 +119,7 @@ class BotTools:
         :param position: The current position of the bot.
         :return: The distance to the goal.
         """
-        return np.linalg.norm(np.array(position) - np.array(self.maze.end))
+        return float(np.linalg.norm(np.array(position) - np.array(self.maze.end)))
     
     def calculate_next_position(self, position: Tuple[int, int], action: int) -> Tuple[int, int]:
         """

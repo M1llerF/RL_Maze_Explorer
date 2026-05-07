@@ -2,10 +2,11 @@ import json
 import os
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
+from typing import Any
 
 
 class BotTrainingFrame(tk.Frame):
-    def __init__(self, parent, controller):
+    def __init__(self, parent: Any, controller: Any) -> None:
         super().__init__(parent)
         self.controller = controller
 
@@ -30,7 +31,7 @@ class BotTrainingFrame(tk.Frame):
         self.maze_mode.set("Random")
         self.maze_mode.pack()
 
-        def on_maze_mode_change(event=None):
+        def on_maze_mode_change(event: Any = None) -> None:
             mode = self.maze_mode.get()
             if mode == "Fixed (Builder)":
                 if not self.controller.game_env.fixed_maze_active or self.controller.game_env.fixed_maze_state is None:
@@ -73,10 +74,10 @@ class BotTrainingFrame(tk.Frame):
 
         self.load_profiles()
 
-    def on_show(self):
+    def on_show(self) -> None:
         self.load_profiles()
 
-    def load_profiles(self):
+    def load_profiles(self) -> None:
         profiles = self.controller.game_env.profile_manager.list_profiles()
         self.profile_select['values'] = profiles
         if self.last_selected_profile and self.last_selected_profile in profiles:
@@ -85,7 +86,7 @@ class BotTrainingFrame(tk.Frame):
             except Exception:
                 pass
 
-    def start_training(self):
+    def start_training(self) -> None:
         if self.training_active:
             return
         selected_profile = self.profile_select.get()
@@ -125,7 +126,7 @@ class BotTrainingFrame(tk.Frame):
             except Exception:
                 pass
 
-        def on_error(err: Exception):
+        def on_error(err: Exception) -> None:
             def _report():
                 try:
                     self.log_output.insert(tk.END, f"Training error: {err}\n")
@@ -143,7 +144,7 @@ class BotTrainingFrame(tk.Frame):
             except Exception:
                 pass
 
-        def on_complete():
+        def on_complete() -> None:
             def _done():
                 self.training_active = False
                 self.set_controls_enabled(True)
@@ -167,7 +168,7 @@ class BotTrainingFrame(tk.Frame):
             on_complete=on_complete,
         )
 
-    def set_controls_enabled(self, enabled: bool):
+    def set_controls_enabled(self, enabled: bool) -> None:
         state = "readonly" if enabled else "disabled"
         entry_state = "normal" if enabled else "disabled"
         try:
@@ -187,7 +188,7 @@ class BotTrainingFrame(tk.Frame):
         except Exception:
             pass
 
-    def stop_training(self):
+    def stop_training(self) -> None:
         if not self.training_active:
             return
         try:
@@ -199,7 +200,7 @@ class BotTrainingFrame(tk.Frame):
         except Exception:
             pass
 
-    def update_progress(self, completed_rounds, total_rounds):
+    def update_progress(self, completed_rounds: int, total_rounds: int) -> None:
         self.training_progress['value'] = completed_rounds
         if (
             completed_rounds == total_rounds
@@ -215,10 +216,10 @@ class BotTrainingFrame(tk.Frame):
             self.training_active = False
             self.set_controls_enabled(True)
 
-    def cancel_training_poll(self):
+    def cancel_training_poll(self) -> None:
         return
 
-    def open_visualization(self):
+    def open_visualization(self) -> None:
         from ui.frames.visualization import VisualizationWindow
 
         selected_profile = self.profile_select.get()
@@ -228,8 +229,9 @@ class BotTrainingFrame(tk.Frame):
         profile = self.controller.game_env.profile_manager.load_profile(selected_profile)
         profile_index = self.controller.game_env.apply_profile(profile)
 
-        if getattr(self, 'visualization_window', None) and self.visualization_window.winfo_exists():
-            self.visualization_window.focus()
+        existing_window = self.visualization_window
+        if existing_window is not None and existing_window.winfo_exists():
+            existing_window.focus()
         else:
             self.visualization_window = VisualizationWindow(self.controller.root, self.controller.game_env, selected_profile, profile_index)
             try:

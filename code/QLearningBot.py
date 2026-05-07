@@ -1,7 +1,5 @@
-import os
-import pickle
 import numpy as np
-from typing import Any, Dict, Tuple
+from typing import Any, cast
 
 from BotStatistics import BotStatistics
 from BaseBot import BaseBot
@@ -17,7 +15,7 @@ class QLearning:
         self.lr = q_learning_config.learning_rate
         self.gamma = q_learning_config.discount_factor
         self.num_actions = 4
-        self.q_table: Dict[Any, np.ndarray] = {}
+        self.q_table: dict[tuple[Any, ...], np.ndarray[Any, Any]] = {}
         self.initial_exploration_rate = 1.0
         self.min_exploration_rate = 0.1
         # Decay per step across episodes (persistent)
@@ -55,8 +53,8 @@ class QLearning:
             self.initial_exploration_rate - self.exploration_decay_rate * self.total_steps,
         )
         if np.random.rand() < exploration_rate:
-            return np.random.randint(self.num_actions)
-        return np.argmax(self.q_table[state_key])
+            return int(np.random.randint(self.num_actions))
+        return int(np.argmax(self.q_table[state_key]))
     
     def save_q_table(self) -> None:
         if self._repo and self._profile:
@@ -72,7 +70,7 @@ class QLearning:
             except Exception:
                 self.q_table = {}
 
-    def state_to_key(self, state: Any) -> Tuple:
+    def state_to_key(self, state: Any) -> tuple[Any, ...]:
         """Convert the state to a hashable key for the Q-table."""
         position_index, wall_distances, goal_direction = state
         if self.use_position_in_state:
@@ -81,7 +79,15 @@ class QLearning:
         return wall_distances, goal_direction
 
 class QLearningBot(BaseBot):
-    def __init__(self, maze, config, reward_system, statistics, profile_name, repository: ArtifactsRepository | None = None):
+    def __init__(
+        self,
+        maze: Any,
+        config: QLearningConfig,
+        reward_system: Any,
+        statistics: BotStatistics,
+        profile_name: str,
+        repository: ArtifactsRepository | None = None,
+    ) -> None:
         """
         Initialize the Q-learning bot.
 
@@ -91,7 +97,9 @@ class QLearningBot(BaseBot):
         :param statistics: Instance of BotStatistics for tracking statistics.
         :param profile_name: Name of the profile for saving/loading data.
         """
-        super().__init__(maze, statistics, config)
+        cast(Any, super()).__init__(maze, statistics, config)
+        self.maze: Any = maze
+        self.statistics: Any = statistics
         # Use injected repository (preferred), fallback to default for backward-compat
         self.repo = repository or ArtifactsRepository()
         self.q_learning = QLearning(config, repo=self.repo, profile_name=profile_name)
@@ -126,19 +134,19 @@ class QLearningBot(BaseBot):
         # Episode runner delegates training episode orchestration
         self.runner = QLearningEpisodeRunner(self)
 
-    def get_bot_specific_data(self):
+    def get_bot_specific_data(self) -> dict[str, Any]:
         """Retrieve bot-specific data."""
         return {'q_table': self.q_learning.q_table}
     
-    def initialize_specific_data(self, data):
+    def initialize_specific_data(self, data: dict[str, Any]) -> None:
         """Initialize bot-specific data."""
         self.q_learning.q_table = data.get('q_table', {})
         self.q_learning.load_q_table()  # Load the Q-table from a file
 
-    def calculate_state(self, position=None):
+    def calculate_state(self, position: tuple[int, int] | None = None) -> tuple[Any, ...]:
         """Calculate the state based on the given position (or current position)."""
         if position is None:
-            position = self.position
+            position = cast(tuple[int, int], self.position)
         position_index = self.tools.pos_to_state(position)
         wall_distances, goal_direction = self.tools.detect_walls(position)
         # visited = self.statistics.get_visited_positions()
@@ -146,11 +154,11 @@ class QLearningBot(BaseBot):
         # return (position_index, wall_distances, tuple(visited), distance_to_goal, goal_direction)
         return (position_index, wall_distances, goal_direction)
     
-    def run_episode(self):
+    def run_episode(self) -> None:
         """Run a single episode of Q-learning (delegated to episode runner)."""
         self.runner.run_episode()
 
-    def reset(self):
+    def reset(self) -> None:
         """Reset the bot's position, statistics, and Q-learning data."""
         self.position = self.maze.start
         self.statistics.reset()
@@ -175,14 +183,16 @@ class QLearningBot(BaseBot):
             raise ValueError("outcome must be a non-empty string")
 
     # ---- Visualization step-wise execution helpers ----
-    def begin_visualization_episode(self):
+    def begin_visualization_episode(self) -> None:
         """Initialize state for a step-wise episode run used by visualization."""
         optimal_path = self.tools.get_optimal_path_info(self.maze.start, self.maze.end, output='path')
+        if isinstance(optimal_path, int):
+            optimal_path = []
         optimal_length = len(optimal_path)
         area_bonus = int(0.5 * self.maze.width * self.maze.height)
         step_limit = min(5000, max(200, 12 * optimal_length + area_bonus)) if optimal_length > 0 else max(200, area_bonus)
 
-        def manhattan(a, b):
+        def manhattan(a: tuple[int, int], b: tuple[int, int]) -> int:
             return abs(a[0]-b[0]) + abs(a[1]-b[1])
 
         self.position = self.maze.get_start()
@@ -195,7 +205,7 @@ class QLearningBot(BaseBot):
         self._vis_optimal_path = optimal_path
         self._vis_optimal_length = optimal_length
         self._vis_step_limit = step_limit
-        self._vis_best_distance = manhattan(self.position, self.maze.end)
+        self._vis_best_distance = manhattan(cast(tuple[int, int], self.position), cast(tuple[int, int], self.maze.end))
         self._vis_no_progress_steps = 0
         self._vis_progress_patience = min(200, 50 * optimal_length)
         self._vis_steps = 0
@@ -254,7 +264,7 @@ class QLearningBot(BaseBot):
                 self._vis_steps += 1
 
                 # Progress tracking for early-stop (currently not used to break early)
-                def manhattan(a, b):
+                def manhattan(a: tuple[int, int], b: tuple[int, int]) -> int:
                     return abs(a[0]-b[0]) + abs(a[1]-b[1])
                 current_distance = manhattan(self.position, self.maze.end)
                 if current_distance < self._vis_best_distance:
