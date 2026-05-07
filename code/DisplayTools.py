@@ -1,28 +1,28 @@
 import os
-import json
 import shutil
 import numpy as np
 import tkinter as tk
 from tkinter import ttk, messagebox
 import matplotlib.colors as mcolors
 from matplotlib import pyplot as plt
+from typing import Any, cast
 
 class DisplayTools:
     @staticmethod
-    def create_frame(parent, controller, title):
+    def create_frame(parent: Any, controller: Any, title: str) -> tk.Frame:
         frame = tk.Frame(parent)
         ttk.Label(frame, text=title, font=("TkDefaultFont", 20)).pack(pady=10, padx=10)
         return frame
 
     @staticmethod
-    def load_profiles(profile_manager, listbox):
+    def load_profiles(profile_manager: Any, listbox: Any) -> None:
         profiles = profile_manager.list_profiles()
         listbox.delete(0, tk.END)
         for profile in profiles:
             listbox.insert(tk.END, profile)
 
     @staticmethod
-    def delete_profile(profile_manager, listbox):
+    def delete_profile(profile_manager: Any, listbox: Any) -> None:
         selected_index = listbox.curselection()
         if not selected_index:
             messagebox.showerror("Error", "No profile selected.")
@@ -43,7 +43,13 @@ class DisplayTools:
             listbox.delete(selected_index)
 
     @staticmethod
-    def display_heatmap(canvas, maze, start, end, heatmap_data):
+    def display_heatmap(
+        canvas: Any,
+        maze: list[list[int]] | None,
+        start: tuple[int, int],
+        end: tuple[int, int],
+        heatmap_data: dict[tuple[int, int], int],
+    ) -> None:
         # Clear the canvas
         canvas.delete("all")
 
@@ -60,7 +66,7 @@ class DisplayTools:
             heatmap[x, y] = count
 
         max_heat = heatmap.max() if heatmap.max() > 0 else 1  # Avoid division by zero
-        cmap = plt.cm.Reds
+        cmap = plt.get_cmap("Reds")
 
         for y in range(maze_height):
             for x in range(maze_width):
@@ -71,7 +77,7 @@ class DisplayTools:
                 else:
                     heat_value = heatmap[y, x] / max_heat
                     if heat_value > 0:
-                        color = mcolors.to_hex(cmap(heat_value))
+                        color = mcolors.to_hex(cast(Any, cmap(heat_value)))
                         canvas.create_rectangle(x * cell_width, y * cell_height,
                                                              (x + 1) * cell_width, (y + 1) * cell_height,
                                                              fill=color, outline=color)

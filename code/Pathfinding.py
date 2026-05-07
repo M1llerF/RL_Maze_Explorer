@@ -1,14 +1,16 @@
 import heapq
 import numpy as np
+from typing import Any
+from collections import deque
 
 class Pathfinding:
     @staticmethod
-    def a_star_search(maze, start, goal):
-        def heuristic(a, b):
-            return np.linalg.norm(np.array(a) - np.array(b))
+    def a_star_search(maze: Any, start: tuple[int, int], goal: tuple[int, int]) -> list[tuple[int, int]]:
+        def heuristic(a: tuple[int, int], b: tuple[int, int]) -> float:
+            return float(np.linalg.norm(np.array(a) - np.array(b)))
         
-        def get_neighbors(pos):
-            neighbors = []
+        def get_neighbors(pos: tuple[int, int]) -> list[tuple[int, int]]:
+            neighbors: list[tuple[int, int]] = []
             directions = [(-1, 0), (1, 0), (0, -1), (0, 1)]
             for dx, dy in directions:
                 x2, y2 = pos[0] + dx, pos[1] + dy
@@ -16,10 +18,10 @@ class Pathfinding:
                     neighbors.append((x2, y2))
             return neighbors
 
-        open_list = []
+        open_list: list[tuple[float, tuple[int, int]]] = []
         heapq.heappush(open_list, (0, start))
-        came_from = {start: None}
-        cost_so_far = {start: 0}
+        came_from: dict[tuple[int, int], tuple[int, int] | None] = {start: None}
+        cost_so_far: dict[tuple[int, int], int] = {start: 0}
         
         while open_list:
             _, current = heapq.heappop(open_list)
@@ -38,7 +40,7 @@ class Pathfinding:
         # Reconstruct path if reachable; otherwise return empty list
         if goal not in came_from:
             return []
-        path = []
+        path: list[tuple[int, int]] = []
         current = goal
         while current is not None and current != start:
             path.append(current)
@@ -51,7 +53,7 @@ class Pathfinding:
         return []
 
     @staticmethod
-    def bfs_shortest_path_grid(grid, start, goal):
+    def bfs_shortest_path_grid(grid: list[list[int]], start: tuple[int, int], goal: tuple[int, int]) -> list[tuple[int, int]]:
         """
         Compute shortest path on a 4-connected grid using BFS.
         grid: 2D list where 0=open, 1=wall. start/goal are (y,x).
@@ -67,10 +69,9 @@ class Pathfinding:
             return []
         if grid[sy][sx] == 1 or grid[ey][ex] == 1:
             return []
-        from collections import deque
-        q = deque()
+        q: deque[tuple[int, int]] = deque()
         q.append((sy, sx))
-        prev = {(sy, sx): None}
+        prev: dict[tuple[int, int], tuple[int, int] | None] = {(sy, sx): None}
         moves = [(1, 0), (-1, 0), (0, 1), (0, -1)]
         while q:
             y, x = q.popleft()
@@ -83,8 +84,8 @@ class Pathfinding:
                     q.append((ny, nx))
         if (ey, ex) not in prev:
             return []
-        cur = (ey, ex)
-        out = []
+        cur: tuple[int, int] | None = (ey, ex)
+        out: list[tuple[int, int]] = []
         while cur is not None:
             out.append(cur)
             cur = prev[cur]

@@ -1,3 +1,4 @@
+# pyright: reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownParameterType=false, reportMissingParameterType=false, reportUnknownLambdaType=false, reportConstantRedefinition=false
 import json
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
@@ -49,6 +50,7 @@ class MazeBuilderFrame(tk.Frame):
 
         # Drag helpers for Line/Rect preview
         self._drag_origin_cell = None
+        self._ctx_cell = None
 
         # Path preview cache
         self._path_cells = None  # list[(y,x)] or None
@@ -532,10 +534,32 @@ class MazeBuilderFrame(tk.Frame):
         self.draw()
 
     def _on_right_click(self, event):
+        self._ctx_cell = self._canvas_to_cell(event)
         try:
             self.ctx_menu.tk_popup(event.x_root, event.y_root)
         finally:
             self.ctx_menu.grab_release()
+
+    def _ctx_action(self, action: str):
+        if self._ctx_cell is None:
+            return
+        y, x = self._ctx_cell
+        h = len(self.grid_data)
+        w = len(self.grid_data[0]) if h else 0
+        if not (0 <= y < h and 0 <= x < w):
+            return
+        self._push_history()
+        if action == "toggle":
+            self.grid_data[y][x] = 0 if self.grid_data[y][x] == 1 else 1
+        elif action == "clear":
+            self.grid_data[y][x] = 0
+        elif action == "start":
+            self.start = (y, x)
+        elif action == "end":
+            self.end = (y, x)
+        self._redo_stack.clear()
+        self._recompute_path()
+        self.draw()
 
     def _on_right_drag(self, event):
         y, x = self._canvas_to_cell(event)
@@ -551,6 +575,9 @@ class MazeBuilderFrame(tk.Frame):
 
     def _on_pan_drag(self, event):
         if not self._panning:
+            return
+        if self._pan_last is None:
+            self._pan_last = (event.x, event.y)
             return
         dx = self._pan_last[0] - event.x
         dy = self._pan_last[1] - event.y

@@ -1,5 +1,6 @@
 import os
 import tkinter as tk
+from typing import Any
 
 from GameEnvironment import GameEnvironment
 from services.training import TrainingController
@@ -53,7 +54,7 @@ class MazeAIApp:
         from ui.frames.maze_builder import MazeBuilderFrame
         from ui.frames.visualization import VisualizationFrame
 
-        self.frames = {}
+        self.frames: dict[str, Any] = {}
         for F in (
             ProfileManagementFrame,
             CreateEditProfileFrame,
@@ -70,7 +71,7 @@ class MazeAIApp:
         self.show_frame("ProfileManagementFrame")
 
     # ----- Navigation helpers -----
-    def show_frame(self, page_name: str):
+    def show_frame(self, page_name: str) -> None:
         frame = self.frames[page_name]
         frame.tkraise()
         if hasattr(frame, 'on_show'):
@@ -79,24 +80,24 @@ class MazeAIApp:
             except Exception:
                 pass
 
-    def show_profile_management(self):
+    def show_profile_management(self) -> None:
         self.show_frame("ProfileManagementFrame")
 
-    def show_create_edit_profile(self, profile=None):
+    def show_create_edit_profile(self, profile: Any = None) -> None:
         frame = self.frames["CreateEditProfileFrame"]
         frame.load_profile(profile)
         self.show_frame("CreateEditProfileFrame")
 
-    def show_bot_training(self):
+    def show_bot_training(self) -> None:
         self.show_frame("BotTrainingFrame")
 
-    def show_visualizations(self):
+    def show_visualizations(self) -> None:
         self.show_frame("VisualizationFrame")
 
-    def show_maze_builder(self):
+    def show_maze_builder(self) -> None:
         self.show_frame("MazeBuilderFrame")
 
-    def on_close(self):
+    def on_close(self) -> None:
         # Attempt to cancel any legacy polling before destroying root
         try:
             bt = self.frames.get("BotTrainingFrame")
