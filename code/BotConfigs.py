@@ -1,6 +1,7 @@
 # bot_configs.py
 from __future__ import annotations
 
+import inspect
 from typing import Any
 
 class QLearningConfig:
@@ -63,3 +64,38 @@ bot_configs: dict[str, dict[str, Any]] = {
         }
     },
 }
+
+
+def get_config_class_for_bot_type(bot_type: str | None) -> type[Any]:
+    """Return the config class registered for a bot type, defaulting to QLearningConfig."""
+    if bot_type and bot_type in bot_configs:
+        config_cls = bot_configs[bot_type].get("class")
+        if isinstance(config_cls, type):
+            return config_cls
+    return QLearningConfig
+
+
+def build_config_for_bot_type(bot_type: str | None, raw_config: Any) -> Any:
+    """Build a bot config instance from raw profile payload data."""
+    config_cls = get_config_class_for_bot_type(bot_type)
+    if isinstance(raw_config, config_cls):
+        return raw_config
+
+    cfg_dict: dict[str, Any] = raw_config if isinstance(raw_config, dict) else {}
+    try:
+        signature = inspect.signature(config_cls)
+        allowed = {
+            name
+            for name in signature.parameters
+            if name != "self"
+            and signature.parameters[name].kind
+            in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+        }
+    except (TypeError, ValueError):
+        allowed = set()
+
+    kwargs = {str(k): v for k, v in cfg_dict.items() if str(k) in allowed}
+    try:
+        return config_cls(**kwargs)
+    except TypeError:
+        return config_cls()

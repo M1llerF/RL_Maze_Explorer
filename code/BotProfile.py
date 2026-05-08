@@ -5,7 +5,7 @@ import pickle
 import tempfile
 from typing import Any, cast
 
-from BotConfigs import QLearningConfig
+from BotConfigs import build_config_for_bot_type
 from RewardSystem import RewardConfig
 from BotStatistics import BotStatistics
 
@@ -16,7 +16,7 @@ class BotProfile:
         self,
         name: str,
         bot_type: str,
-        config: QLearningConfig,
+        config: Any,
         reward_config: RewardConfig,
         statistics: BotStatistics,
         bot_specific_data: dict[str, Any],
@@ -71,19 +71,11 @@ class BotProfile:
         # Infer bot type if missing
         bot_type = d.get('bot_type')
         cfg_raw = d.get('config')
-        cfg_dict: dict[str, Any] = cast(dict[str, Any], cfg_raw) if isinstance(cfg_raw, dict) else {}
         if bot_type is None:
             bot_type = 'QLearningBot'
 
-        # Build config safely with only known keys
-        config_class = QLearningConfig
-        allowed = {'learning_rate','discount_factor','use_position_in_state'}
-        cfg_kwargs: dict[str, Any] = {}
-        cfg_kwargs = {str(k): v for k, v in cfg_dict.items() if str(k) in allowed}
-        try:
-            config = config_class(**cfg_kwargs)
-        except TypeError:
-            config = config_class()
+        # Build config using bot-type mapping; defaults to QLearning for legacy payloads.
+        config = build_config_for_bot_type(bot_type, cfg_raw)
 
         # Reward config
         reward_config = d.get('reward_config')
