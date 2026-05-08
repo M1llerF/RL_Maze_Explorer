@@ -48,6 +48,40 @@ class ArtifactsRepository:
     def q_table_checksum_path(self, profile: str) -> str:
         return os.path.join(self._profile_dir(profile), "q_table.checksum")
 
+    # ---------- Future model artifacts (extension seam) ----------
+    def model_artifacts_dir(self, profile: str) -> str:
+        return os.path.join(self._profile_dir(profile), "artifacts")
+
+    def _validate_artifact_name(self, artifact_name: str) -> str:
+        # Fail fast on path traversal or empty names.
+        cleaned = artifact_name.strip()
+        if not cleaned or os.path.basename(cleaned) != cleaned:
+            raise ValueError(f"Invalid artifact name: {artifact_name}")
+        return cleaned
+
+    def model_artifact_path(self, profile: str, artifact_name: str) -> str:
+        name = self._validate_artifact_name(artifact_name)
+        return os.path.join(self.model_artifacts_dir(profile), name)
+
+    def save_model_artifact_bytes(self, profile: str, artifact_name: str, data: bytes) -> None:
+        d = self.model_artifacts_dir(profile)
+        self._ensure_dir(d)
+        path = self.model_artifact_path(profile, artifact_name)
+        with tempfile.NamedTemporaryFile(delete=False, dir=d, mode='wb') as tmp:
+            tmp.write(data)
+            temp = tmp.name
+        os.replace(temp, path)
+
+    def load_model_artifact_bytes(self, profile: str, artifact_name: str) -> bytes | None:
+        path = self.model_artifact_path(profile, artifact_name)
+        if not os.path.exists(path) or os.path.getsize(path) == 0:
+            return None
+        try:
+            with open(path, 'rb') as f:
+                return f.read()
+        except Exception:
+            return None
+
     def _file_checksum(self, file_path: str) -> str:
         sha256 = hashlib.sha256()
         with open(file_path, 'rb') as f:
