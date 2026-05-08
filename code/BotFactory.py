@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from typing import Any, Protocol
 
 from RewardSystem import RewardSystem, MazeSensors
@@ -30,6 +31,14 @@ class BotFactory:
         """
         self.bot_registry[bot_type] = bot_class
 
+    def is_registered(self, bot_type: str) -> bool:
+        """Return whether the given bot type is registered."""
+        return bot_type in self.bot_registry
+
+    def list_registered_bot_types(self) -> list[str]:
+        """Return sorted registered bot type names for diagnostics/UI callers."""
+        return sorted(self.bot_registry.keys())
+
     def create_bot(
         self,
         bot_type: str,
@@ -53,25 +62,37 @@ class BotFactory:
         
         :raises ValueError: If the bot type is not registered.
         """
-        if bot_type not in self.bot_registry:
-            raise ValueError(f"Unknown bot type: {bot_type}")
+        if not self.is_registered(bot_type):
+            known = self.list_registered_bot_types()
+            known_msg = ", ".join(known) if known else "<none>"
+            raise ValueError(f"Unknown bot type: {bot_type}. Registered bot types: {known_msg}")
 
         bot_class = self.bot_registry[bot_type]
         # Provide minimal sensors interface decoupled from BotTools
         reward_system = RewardSystem(self.maze, reward_config, sensors=MazeSensors(self.maze))
-        # Inject shared repository instance
-        try:
-            bot_instance = bot_class(
-                self.maze,
-                config,
-                reward_system,
-                statistics,
-                profile_name=profile_name,
-                repository=self.repository,
-            )
-        except TypeError:
-            # Backward compatibility if constructor doesn't accept repository yet
-            bot_instance = bot_class(self.maze, config, reward_system, statistics, profile_name=profile_name)
+        # Constructor argument filtering keeps multi-bot extension straightforward
+        # without per-bot branching in the factory.
+        constructor_args: dict[str, Any] = {
+            "maze": self.maze,
+            "config": config,
+            "reward_system": reward_system,
+            "statistics": statistics,
+            "profile_name": profile_name,
+            "repository": self.repository,
+        }
+        signature = inspect.signature(bot_class)
+        accepts_kwargs = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in signature.parameters.values())
+        if accepts_kwargs:
+            ctor_kwargs = constructor_args
+        else:
+            accepted = {
+                name
+                for name, p in signature.parameters.items()
+                if name != "self"
+                and p.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+            }
+            ctor_kwargs = {k: v for k, v in constructor_args.items() if k in accepted}
+        bot_instance = bot_class(**ctor_kwargs)
         
         if hasattr(bot_instance, 'initialize_specific_data'):
             bot_instance.initialize_specific_data(bot_specific_data)
