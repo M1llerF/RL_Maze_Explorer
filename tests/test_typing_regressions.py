@@ -1,5 +1,6 @@
 import os
 import sys
+import tempfile
 import unittest
 from typing import Any, cast
 
@@ -9,12 +10,14 @@ CODE_DIR = os.path.join(ROOT, "code")
 if CODE_DIR not in sys.path:
     sys.path.insert(0, CODE_DIR)
 
-from BotConfigs import QLearningConfig
+from BotConfigs import QLearningConfig, bot_configs
 from BotFactory import BotFactory
-from BotProfile import BotProfile
+from BotProfile import BotProfile, ProfileManager
 from BotStatistics import BotStatistics
-from QLearningBot import QLearning
+from QLearningBot import QLearning, QLearningBot
 from RewardSystem import RewardConfig
+from RewardSystem import RewardSystem
+from services.runners import QLearningEpisodeRunner
 from services.repository import ArtifactsRepository
 
 
@@ -75,6 +78,117 @@ class _LegacyCtorNoRepository:
         self.specific_data = data
 
 
+class _FutureConfig:
+    def __init__(self, alpha: float = 0.7, beta: int = 2) -> None:
+        self.alpha = alpha
+        self.beta = beta
+
+
+class _RunnerDummyTools:
+    def get_optimal_path_info(self, _start: tuple[int, int], _end: tuple[int, int], output: str = "path") -> list[tuple[int, int]]:
+        return [(0, 0), (0, 1)]
+
+    def calculate_next_position(self, _pos: tuple[int, int], _action: int) -> tuple[int, int]:
+        return (0, 1)
+
+
+class _RunnerDummyStats:
+    def __init__(self) -> None:
+        self.times_revisited_squares = 0
+        self.non_repeating_steps_taken = 0
+        self.total_steps = 0
+        self._visited: dict[tuple[int, int], int] = {}
+
+    def get_visited_positions(self) -> dict[tuple[int, int], int]:
+        return self._visited
+
+    def update_last_visited(self, _pos: tuple[int, int]) -> None:
+        return
+
+    def update_visited_positions(self, pos: tuple[int, int]) -> None:
+        self._visited[pos] = self._visited.get(pos, 0) + 1
+
+
+class _RunnerDummyRewardSystem:
+    def get_reward(self, *_args: Any, **_kwargs: Any) -> float:
+        return 1.0
+
+
+class _RunnerDummyQ:
+    def __init__(self) -> None:
+        self.total_steps = 0
+        self.saved = False
+
+    def choose_action(self, _state: Any, _stats: Any) -> int:
+        return 0
+
+    def update_q_value(self, _state: Any, _action: int, _reward: float, _new_state: Any) -> None:
+        return
+
+    def save_q_table(self) -> None:
+        self.saved = True
+
+
+class _RunnerDummyRepo:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def save_maze_episode(self, *_args: Any, **_kwargs: Any) -> None:
+        self.calls.append("save_maze_episode")
+
+    def update_steps_from_heatmap(self, *_args: Any, **_kwargs: Any) -> None:
+        self.calls.append("update_steps_from_heatmap")
+
+    def increment_times_hit_wall(self, *_args: Any, **_kwargs: Any) -> None:
+        self.calls.append("increment_times_hit_wall")
+
+    def append_reward(self, *_args: Any, **_kwargs: Any) -> None:
+        self.calls.append("append_reward")
+
+
+class _RunnerDummyMaze:
+    start = (0, 0)
+    end = (0, 1)
+    width = 2
+    height = 1
+    grid = [[0, 0]]
+
+    def is_valid_position(self, _profile_name: str, row: int, col: int) -> bool:
+        return row == 0 and col in (0, 1)
+
+    def get_start(self) -> tuple[int, int]:
+        return self.start
+
+
+class _VizDummyRepo:
+    def __init__(self) -> None:
+        self.persist_calls = 0
+
+    def load_q_table(self, _profile: str) -> dict[Any, Any]:
+        return {}
+
+    def ensure_maze_file(self, _profile: str) -> None:
+        return
+
+    def load_maze_data(self, _profile: str) -> dict[str, Any]:
+        return {"highest": {"reward": float("-inf")}, "lowest": {"reward": float("inf")}}
+
+    def save_q_table(self, _profile: str, _q_table: dict[Any, Any]) -> None:
+        self.persist_calls += 1
+
+    def save_maze_episode(self, *_args: Any, **_kwargs: Any) -> None:
+        self.persist_calls += 1
+
+    def update_steps_from_heatmap(self, *_args: Any, **_kwargs: Any) -> None:
+        self.persist_calls += 1
+
+    def increment_times_hit_wall(self, *_args: Any, **_kwargs: Any) -> None:
+        self.persist_calls += 1
+
+    def append_reward(self, *_args: Any, **_kwargs: Any) -> None:
+        self.persist_calls += 1
+
+
 class TypingRegressionTests(unittest.TestCase):
     def test_profile_from_dict_uses_defaults_on_missing_or_none_data(self) -> None:
         bot_profile_cls: Any = BotProfile
@@ -104,6 +218,37 @@ class TypingRegressionTests(unittest.TestCase):
         self.assertFalse(profile.config.use_position_in_state)
         self.assertFalse(hasattr(profile.config, "unexpected"))
 
+    def test_profile_from_dict_defaults_to_qlearning_for_unknown_bot_type(self) -> None:
+        bot_profile_cls: Any = BotProfile
+        profile: Any = bot_profile_cls.from_dict(
+            {
+                "name": "p-unknown",
+                "bot_type": "FutureUnknownBot",
+                "config": {"learning_rate": 0.33, "discount_factor": 0.77},
+            }
+        )
+        self.assertEqual(profile.bot_type, "FutureUnknownBot")
+        self.assertIsInstance(profile.config, QLearningConfig)
+        self.assertEqual(profile.config.learning_rate, 0.33)
+        self.assertEqual(profile.config.discount_factor, 0.77)
+
+    def test_profile_from_dict_uses_registered_config_class_for_bot_type(self) -> None:
+        bot_configs["FutureBot"] = {"class": _FutureConfig}
+        self.addCleanup(lambda: bot_configs.pop("FutureBot", None))
+        bot_profile_cls: Any = BotProfile
+        profile: Any = bot_profile_cls.from_dict(
+            {
+                "name": "p-future",
+                "bot_type": "FutureBot",
+                "config": {"alpha": 1.5, "beta": 4, "ignored": 123},
+            }
+        )
+        self.assertEqual(profile.bot_type, "FutureBot")
+        self.assertIsInstance(profile.config, _FutureConfig)
+        self.assertEqual(profile.config.alpha, 1.5)
+        self.assertEqual(profile.config.beta, 4)
+        self.assertFalse(hasattr(profile.config, "ignored"))
+
     def test_profile_from_dict_tolerates_non_dict_reward_and_statistics(self) -> None:
         bot_profile_cls: Any = BotProfile
         profile: Any = bot_profile_cls.from_dict(
@@ -132,7 +277,10 @@ class TypingRegressionTests(unittest.TestCase):
 
     def test_bot_factory_rejects_unknown_bot_type(self) -> None:
         factory: Any = BotFactory(_DummyMaze())
-        with self.assertRaisesRegex(ValueError, r"Unknown bot type: MissingBot"):
+        with self.assertRaisesRegex(
+            ValueError,
+            r"Unknown bot type: MissingBot\. Registered bot types: <none>",
+        ):
             factory.create_bot(
                 "MissingBot",
                 "profile",
@@ -141,6 +289,14 @@ class TypingRegressionTests(unittest.TestCase):
                 BotStatistics(),
                 {},
             )
+
+    def test_bot_factory_registry_helpers(self) -> None:
+        factory: Any = BotFactory(_DummyMaze())
+        self.assertFalse(factory.is_registered("QLearningBot"))
+        factory.register_bot("ZBot", _LegacyCtorNoRepository)
+        factory.register_bot("ABot", _LegacyCtorNoRepository)
+        self.assertTrue(factory.is_registered("ZBot"))
+        self.assertEqual(factory.list_registered_bot_types(), ["ABot", "ZBot"])
 
     def test_bot_factory_passes_repository_when_ctor_supports_it(self) -> None:
         repo = ArtifactsRepository(base_dir=os.path.join(ROOT, "profiles"))
@@ -185,6 +341,100 @@ class TypingRegressionTests(unittest.TestCase):
         q_any: Any = q
         key: tuple[Any, ...] = cast(tuple[Any, ...], q_any.state_to_key(state))
         self.assertEqual(key, state)
+
+    def test_runner_uses_explicit_start_step_end_lifecycle(self) -> None:
+        class _DummyBot:
+            def __init__(self) -> None:
+                self.tools = _RunnerDummyTools()
+                self.maze = _RunnerDummyMaze()
+                self.statistics = _RunnerDummyStats()
+                self.reward_system = _RunnerDummyRewardSystem()
+                self.q_learning = _RunnerDummyQ()
+                self.repo = _RunnerDummyRepo()
+                self.profile_name = "runner-test"
+                self.position = (0, 0)
+                self.state = ("s",)
+                self.total_reward = 0.0
+                self.episode_counter = 0
+                self.hooks: list[str] = []
+
+            def calculate_state(self, position: tuple[int, int] | None = None) -> tuple[Any, ...]:
+                p = self.position if position is None else position
+                return (p,)
+
+            def on_episode_start(self, mode: str) -> None:
+                self.hooks.append(f"start:{mode}")
+
+            def on_episode_step(self, mode: str, _step_index: int) -> None:
+                self.hooks.append(f"step:{mode}")
+
+            def on_episode_end(self, mode: str, outcome: str) -> None:
+                self.hooks.append(f"end:{mode}:{outcome}")
+
+        bot = _DummyBot()
+        runner = QLearningEpisodeRunner(bot)
+        runner.run_episode()
+
+        self.assertGreaterEqual(len(bot.hooks), 3)
+        self.assertEqual(bot.hooks[0], "start:training")
+        self.assertIn("step:training", bot.hooks)
+        self.assertTrue(bot.hooks[-1].startswith("end:training:"))
+        self.assertEqual(bot.episode_counter, 1)
+        self.assertTrue(bot.q_learning.saved)
+        self.assertIn("append_reward", bot.repo.calls)
+
+    def test_repository_model_artifact_bytes_round_trip(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = ArtifactsRepository(base_dir=td)
+            payload = b"\x01\x02future-model"
+            repo.save_model_artifact_bytes("p1", "weights.bin", payload)
+            loaded = repo.load_model_artifact_bytes("p1", "weights.bin")
+            self.assertEqual(loaded, payload)
+
+    def test_repository_model_artifact_rejects_path_traversal_name(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = ArtifactsRepository(base_dir=td)
+            with self.assertRaisesRegex(ValueError, r"Invalid artifact name"):
+                repo.save_model_artifact_bytes("p1", "../weights.bin", b"x")
+
+    def test_profile_manager_round_trip_qlearning_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            manager = ProfileManager(td)
+            src = BotProfile(
+                name="roundtrip_a",
+                bot_type="QLearningBot",
+                config=QLearningConfig(learning_rate=0.2, discount_factor=0.85, use_position_in_state=False),
+                reward_config=RewardConfig(),
+                statistics=BotStatistics(),
+                bot_specific_data={"tag": "x"},
+            )
+            manager.save_profile(src)
+            loaded = manager.load_profile("roundtrip_a")
+            self.assertEqual(loaded.name, "roundtrip_a")
+            self.assertEqual(loaded.bot_type, "QLearningBot")
+            self.assertIsInstance(loaded.config, QLearningConfig)
+            self.assertEqual(loaded.config.learning_rate, 0.2)
+            self.assertEqual(loaded.config.discount_factor, 0.85)
+            self.assertFalse(loaded.config.use_position_in_state)
+            self.assertEqual(loaded.bot_specific_data.get("tag"), "x")
+
+    def test_visualization_step_does_not_persist_training_artifacts(self) -> None:
+        maze = _RunnerDummyMaze()
+        reward_system = RewardSystem(maze, RewardConfig())
+        stats = BotStatistics()
+        repo = _VizDummyRepo()
+        bot = QLearningBot(
+            maze=maze,
+            config=QLearningConfig(),
+            reward_system=reward_system,
+            statistics=stats,
+            profile_name="viz_test",
+            repository=cast(Any, repo),
+        )
+        before = repo.persist_calls
+        finished = bot.step_visualization(max_steps=3)
+        self.assertIsInstance(finished, bool)
+        self.assertEqual(repo.persist_calls, before)
 
 
 if __name__ == "__main__":
