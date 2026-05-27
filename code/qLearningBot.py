@@ -10,82 +10,86 @@ from services.runners import QLearningEpisodeRunner
 
 
 class QLearning:
-    def __init__(self, q_learning_config: QLearningConfig, repo: ArtifactsRepository | None = None, profile_name: str | None = None):
+    def __init__(self, qLearningConfig: QLearningConfig, repo: ArtifactsRepository | None = None, profileName: str | None = None):
         """Initialize Q-learning algorithm with the given configuration."""
-        self.lr = q_learning_config.learning_rate
-        self.gamma = q_learning_config.discount_factor
-        self.num_actions = 4
-        self.q_table: dict[tuple[Any, ...], np.ndarray[Any, Any]] = {}
-        self.initial_exploration_rate = 1.0
-        self.min_exploration_rate = 0.1
+        self.lr = qLearningConfig.learningRate
+        self.gamma = qLearningConfig.discountFactor
+        self.numActions = 4
+        self.qTable: dict[tuple[Any, ...], np.ndarray[Any, Any]] = {}
+        self.initialExplorationRate = 1.0
+        self.minExplorationRate = 0.1
         # Decay per step across episodes (persistent)
-        self.exploration_decay_rate = 0.0005
-        self.total_steps = 0
-        self.use_position_in_state = getattr(q_learning_config, 'use_position_in_state', True)
+        self.explorationDecayRate = 0.0005
+        self.totalSteps = 0
+        self.usePositionInState = getattr(
+            qLearningConfig,
+            'usePositionInState',
+            getattr(qLearningConfig, 'use_position_in_state', True),
+        )
         self._repo = repo
-        self._profile = profile_name
+        self._profile = profileName
 
-    def update_q_value(self, state: Any, action: int, reward: float, new_state: Any) -> None:
+    def updateQValue(self, state: Any, action: int, reward: float, newState: Any) -> None:
         """ Update Q-value for the given state-action pair."""
-        state_key = self.state_to_key(state)
-        new_state_key = self.state_to_key(new_state)
+        stateKey = self.stateToKey(state)
+        newStateKey = self.stateToKey(newState)
 
-        if state_key not in self.q_table:
-            self.q_table[state_key] = np.zeros(self.num_actions)
-        if new_state_key not in self.q_table:
-            self.q_table[new_state_key] = np.zeros(self.num_actions)
+        if stateKey not in self.qTable:
+            self.qTable[stateKey] = np.zeros(self.numActions)
+        if newStateKey not in self.qTable:
+            self.qTable[newStateKey] = np.zeros(self.numActions)
 
-        old_value = self.q_table[state_key][action]
-        future_optimal_value = np.max(self.q_table[new_state_key])
-        new_value = old_value + self.lr * (reward + self.gamma * future_optimal_value - old_value)
-        self.q_table[state_key][action] = new_value
+        oldValue = self.qTable[stateKey][action]
+        futureOptimalValue = np.max(self.qTable[newStateKey])
+        newValue = oldValue + self.lr * (reward + self.gamma * futureOptimalValue - oldValue)
+        self.qTable[stateKey][action] = newValue
     
-    def choose_action(self, state: Any, statistics: BotStatistics) -> int:
+    def chooseAction(self, state: Any, statistics: BotStatistics) -> int:
         """Choose action based on the exploration-exploitation trade-off."""
-        state_key = self.state_to_key(state)
+        stateKey = self.stateToKey(state)
 
-        if state_key not in self.q_table:
-            self.q_table[state_key] = np.zeros(self.num_actions) 
+        if stateKey not in self.qTable:
+            self.qTable[stateKey] = np.zeros(self.numActions) 
         
         # Use a persistent decay across all episodes to reduce exploration over time
-        exploration_rate = max(
-            self.min_exploration_rate,
-            self.initial_exploration_rate - self.exploration_decay_rate * self.total_steps,
+        explorationRate = max(
+            self.minExplorationRate,
+            self.initialExplorationRate - self.explorationDecayRate * self.totalSteps,
         )
-        if np.random.rand() < exploration_rate:
-            return int(np.random.randint(self.num_actions))
-        return int(np.argmax(self.q_table[state_key]))
+        if np.random.rand() < explorationRate:
+            return int(np.random.randint(self.numActions))
+        return int(np.argmax(self.qTable[stateKey]))
     
-    def save_q_table(self) -> None:
+    def saveQTable(self) -> None:
         if self._repo and self._profile:
             try:
-                self._repo.save_q_table(self._profile, self.q_table)
+                self._repo.saveQTable(self._profile, self.qTable)
             except Exception:
                 pass
 
-    def load_q_table(self) -> None:
+    def loadQTable(self) -> None:
         if self._repo and self._profile:
             try:
-                self.q_table = self._repo.load_q_table(self._profile) or {}
+                self.qTable = self._repo.loadQTable(self._profile) or {}
             except Exception:
-                self.q_table = {}
+                self.qTable = {}
 
-    def state_to_key(self, state: Any) -> tuple[Any, ...]:
+    def stateToKey(self, state: Any) -> tuple[Any, ...]:
         """Convert the state to a hashable key for the Q-table."""
-        position_index, wall_distances, goal_direction = state
-        if self.use_position_in_state:
-            return position_index, wall_distances, goal_direction
+        positionIndex, wallDistances, goalDirection = state
+        if self.usePositionInState:
+            return positionIndex, wallDistances, goalDirection
         # Exclude absolute position to improve generalization to new mazes
-        return wall_distances, goal_direction
+        return wallDistances, goalDirection
 
 class QLearningBot(BaseBot):
     def __init__(
         self,
         maze: Any,
         config: QLearningConfig,
-        reward_system: Any,
+        rewardSystem: Any,
         statistics: BotStatistics,
-        profile_name: str,
+        profileName: str,
         repository: ArtifactsRepository | None = None,
     ) -> None:
         """
@@ -102,116 +106,116 @@ class QLearningBot(BaseBot):
         self.statistics: Any = statistics
         # Use injected repository (preferred), fallback to default for backward-compat
         self.repo = repository or ArtifactsRepository()
-        self.q_learning = QLearning(config, repo=self.repo, profile_name=profile_name)
+        self.qLearning = QLearning(config, repo=self.repo, profileName=profileName)
         self.tools = BotTools(maze)
-        self.reward_system = reward_system
-        self.profile_name = profile_name
-        self.total_reward = 0
-        self.episode_counter = 0
-        self.position = maze.get_start()
-        self.state = self.calculate_state()
-        self.q_learning.load_q_table()  # Load Q-table when initializing
+        self.rewardSystem = rewardSystem
+        self.profileName = profileName
+        self.totalReward = 0
+        self.episodeCounter = 0
+        self.position = maze.getStart()
+        self.state = self.calculateState()
+        self.qLearning.loadQTable()  # Load Q-table when initializing
 
         try:
-            self.repo.ensure_maze_file(profile_name)
-            maze_data = self.repo.load_maze_data(profile_name)
+            self.repo.ensureMazeFile(profileName)
+            mazeData = self.repo.loadMazeData(profileName)
         except Exception:
-            maze_data = {"highest": {"reward": float('-inf')}, "lowest": {"reward": float('inf')}}
-        self.highest_reward = float(maze_data.get("highest", {}).get("reward", float('-inf')))
-        self.lowest_reward = float(maze_data.get("lowest", {}).get("reward", float('inf')))
+            mazeData = {"highest": {"reward": float('-inf')}, "lowest": {"reward": float('inf')}}
+        self.highestReward = float(mazeData.get("highest", {}).get("reward", float('-inf')))
+        self.lowestReward = float(mazeData.get("lowest", {}).get("reward", float('inf')))
 
         # Visualization step-wise execution state
-        self._vis_active = False
-        self._vis_initialized = False
-        self._vis_optimal_path = None
-        self._vis_optimal_length = 0
-        self._vis_step_limit = 0
-        self._vis_best_distance = 0
-        self._vis_no_progress_steps = 0
-        self._vis_progress_patience = 0
-        self._vis_steps = 0
-        self._vis_times_hit_wall = 0
+        self._visActive = False
+        self._visInitialized = False
+        self._visOptimalPath = None
+        self._visOptimalLength = 0
+        self._visStepLimit = 0
+        self._visBestDistance = 0
+        self._visNoProgressSteps = 0
+        self._visProgressPatience = 0
+        self._visSteps = 0
+        self._visTimesHitWall = 0
         # Episode runner delegates training episode orchestration
         self.runner = QLearningEpisodeRunner(self)
 
-    def get_bot_specific_data(self) -> dict[str, Any]:
+    def getBotSpecificData(self) -> dict[str, Any]:
         """Retrieve bot-specific data."""
-        return {'q_table': self.q_learning.q_table}
+        return {'q_table': self.qLearning.qTable}
     
-    def initialize_specific_data(self, data: dict[str, Any]) -> None:
+    def initializeSpecificData(self, data: dict[str, Any]) -> None:
         """Initialize bot-specific data."""
-        self.q_learning.q_table = data.get('q_table', {})
-        self.q_learning.load_q_table()  # Load the Q-table from a file
+        self.qLearning.qTable = data.get('q_table', {})
+        self.qLearning.loadQTable()  # Load the Q-table from a file
 
-    def calculate_state(self, position: tuple[int, int] | None = None) -> tuple[Any, ...]:
+    def calculateState(self, position: tuple[int, int] | None = None) -> tuple[Any, ...]:
         """Calculate the state based on the given position (or current position)."""
         if position is None:
             position = cast(tuple[int, int], self.position)
-        position_index = self.tools.pos_to_state(position)
-        wall_distances, goal_direction = self.tools.detect_walls(position)
+        positionIndex = self.tools.posToState(position)
+        wallDistances, goalDirection = self.tools.detectWalls(position)
         # visited = self.statistics.get_visited_positions()
         # distance_to_goal = self.tools.get_distance_to_goal(self.position)
         # return (position_index, wall_distances, tuple(visited), distance_to_goal, goal_direction)
-        return (position_index, wall_distances, goal_direction)
+        return (positionIndex, wallDistances, goalDirection)
     
-    def run_episode(self) -> None:
+    def runEpisode(self) -> None:
         """Run a single episode of Q-learning (delegated to episode runner)."""
-        self.runner.run_episode()
+        self.runner.runEpisode()
 
     def reset(self) -> None:
         """Reset the bot's position, statistics, and Q-learning data."""
         self.position = self.maze.start
         self.statistics.reset()
-        self.total_reward = 0
-        self.state = self.calculate_state()
+        self.totalReward = 0
+        self.state = self.calculateState()
 
     # Training lifecycle hooks (explicit contract implementation)
-    def on_episode_start(self, mode: str) -> None:
+    def onEpisodeStart(self, mode: str) -> None:
         if mode != "training":
             raise ValueError(f"Unsupported episode mode for QLearningBot: {mode}")
 
-    def on_episode_step(self, mode: str, step_index: int) -> None:
+    def onEpisodeStep(self, mode: str, stepIndex: int) -> None:
         if mode != "training":
             raise ValueError(f"Unsupported episode mode for QLearningBot: {mode}")
-        if step_index < 0:
-            raise ValueError(f"step_index must be non-negative, got {step_index}")
+        if stepIndex < 0:
+            raise ValueError(f"step_index must be non-negative, got {stepIndex}")
 
-    def on_episode_end(self, mode: str, outcome: str) -> None:
+    def onEpisodeEnd(self, mode: str, outcome: str) -> None:
         if mode != "training":
             raise ValueError(f"Unsupported episode mode for QLearningBot: {mode}")
         if not outcome:
             raise ValueError("outcome must be a non-empty string")
 
     # ---- Visualization step-wise execution helpers ----
-    def begin_visualization_episode(self) -> None:
+    def beginVisualizationEpisode(self) -> None:
         """Initialize state for a step-wise episode run used by visualization."""
-        optimal_path = self.tools.get_optimal_path_info(self.maze.start, self.maze.end, output='path')
-        if isinstance(optimal_path, int):
-            optimal_path = []
-        optimal_length = len(optimal_path)
-        area_bonus = int(0.5 * self.maze.width * self.maze.height)
-        step_limit = min(5000, max(200, 12 * optimal_length + area_bonus)) if optimal_length > 0 else max(200, area_bonus)
+        optimalPath = self.tools.getOptimalPathInfo(self.maze.start, self.maze.end, output='path')
+        if isinstance(optimalPath, int):
+            optimalPath = []
+        optimalLength = len(optimalPath)
+        areaBonus = int(0.5 * self.maze.width * self.maze.height)
+        stepLimit = min(5000, max(200, 12 * optimalLength + areaBonus)) if optimalLength > 0 else max(200, areaBonus)
 
         def manhattan(a: tuple[int, int], b: tuple[int, int]) -> int:
             return abs(a[0]-b[0]) + abs(a[1]-b[1])
 
-        self.position = self.maze.get_start()
+        self.position = self.maze.getStart()
         self.statistics.reset()
-        self.total_reward = 0
-        self.state = self.calculate_state()
+        self.totalReward = 0
+        self.state = self.calculateState()
 
-        self._vis_active = True
-        self._vis_initialized = True
-        self._vis_optimal_path = optimal_path
-        self._vis_optimal_length = optimal_length
-        self._vis_step_limit = step_limit
-        self._vis_best_distance = manhattan(cast(tuple[int, int], self.position), cast(tuple[int, int], self.maze.end))
-        self._vis_no_progress_steps = 0
-        self._vis_progress_patience = min(200, 50 * optimal_length)
-        self._vis_steps = 0
-        self._vis_times_hit_wall = 0
+        self._visActive = True
+        self._visInitialized = True
+        self._visOptimalPath = optimalPath
+        self._visOptimalLength = optimalLength
+        self._visStepLimit = stepLimit
+        self._visBestDistance = manhattan(cast(tuple[int, int], self.position), cast(tuple[int, int], self.maze.end))
+        self._visNoProgressSteps = 0
+        self._visProgressPatience = min(200, 50 * optimalLength)
+        self._visSteps = 0
+        self._visTimesHitWall = 0
 
-    def step_visualization(self, max_steps: int = 1) -> bool:
+    def stepVisualization(self, maxSteps: int = 1) -> bool:
         """
         Perform up to max_steps steps for live visualization only.
 
@@ -221,64 +225,64 @@ class QLearningBot(BaseBot):
         - Only in-memory bot position and statistics.heatmap are updated for drawing
         - Returns True when the episode finishes; caller resets environment
         """
-        if not self._vis_initialized:
-            self.begin_visualization_episode()
+        if not self._visInitialized:
+            self.beginVisualizationEpisode()
 
-        for _ in range(max_steps):
+        for _ in range(maxSteps):
             if self.position == self.maze.end:
-                return self._finalize_visualization_episode()
+                return self._finalizeVisualizationEpisode()
 
-            action = self.q_learning.choose_action(self.state, self.statistics)
-            new_position = self.tools.calculate_next_position(self.position, action)
-            self.statistics.total_steps = self.statistics.times_revisited_squares + self.statistics.non_repeating_steps_taken
+            action = self.qLearning.chooseAction(self.state, self.statistics)
+            newPosition = self.tools.calculateNextPosition(self.position, action)
+            self.statistics.totalSteps = self.statistics.timesRevisitedSquares + self.statistics.nonRepeatingStepsTaken
 
             reward = 0
-            if not self.maze.is_valid_position(self.profile_name, new_position[0], new_position[1]):
+            if not self.maze.isValidPosition(self.profileName, newPosition[0], newPosition[1]):
                 # In visualization: compute reward for display consistency, but do not learn
-                reward += self.reward_system.get_reward(self.position, new_position, self._vis_optimal_path, self._vis_optimal_length, self.statistics.get_visited_positions())
+                reward += self.rewardSystem.getReward(self.position, newPosition, self._visOptimalPath, self._visOptimalLength, self.statistics.getVisitedPositions())
                 # Do not update Q-values or global training step counters here
-                self.total_reward += reward
-                self._vis_times_hit_wall += 1
+                self.totalReward += reward
+                self._visTimesHitWall += 1
                 # continue to next step without moving
             else:
                 # Track the previous position, then count the new cell after moving
-                self.statistics.update_last_visited(self.position)
-                reward += self.reward_system.get_reward(self.position, new_position, self._vis_optimal_path, self._vis_optimal_length, self.statistics.get_visited_positions())
+                self.statistics.updateLastVisited(self.position)
+                reward += self.rewardSystem.getReward(self.position, newPosition, self._visOptimalPath, self._visOptimalLength, self.statistics.getVisitedPositions())
 
-                if new_position in self.statistics.get_visited_positions():
-                    self.statistics.times_revisited_squares += 1
+                if newPosition in self.statistics.getVisitedPositions():
+                    self.statistics.timesRevisitedSquares += 1
                 else:
-                    self.statistics.non_repeating_steps_taken += 1
+                    self.statistics.nonRepeatingStepsTaken += 1
 
-                if self.statistics.total_steps > self._vis_step_limit:
+                if self.statistics.totalSteps > self._visStepLimit:
                     reward += -100
-                    self.total_reward += reward
-                    return self._finalize_visualization_episode()
+                    self.totalReward += reward
+                    return self._finalizeVisualizationEpisode()
 
-                self.total_reward += reward
+                self.totalReward += reward
                 # Advance environment state only; do not learn
-                new_state = self.calculate_state(new_position)
-                self.position = new_position
-                self.statistics.update_visited_positions(self.position)
-                self.state = new_state
-                self._vis_steps += 1
+                newState = self.calculateState(newPosition)
+                self.position = newPosition
+                self.statistics.updateVisitedPositions(self.position)
+                self.state = newState
+                self._visSteps += 1
 
                 # Progress tracking for early-stop (currently not used to break early)
                 def manhattan(a: tuple[int, int], b: tuple[int, int]) -> int:
                     return abs(a[0]-b[0]) + abs(a[1]-b[1])
-                current_distance = manhattan(self.position, self.maze.end)
-                if current_distance < self._vis_best_distance:
-                    self._vis_best_distance = current_distance
-                    self._vis_no_progress_steps = 0
+                currentDistance = manhattan(self.position, self.maze.end)
+                if currentDistance < self._visBestDistance:
+                    self._visBestDistance = currentDistance
+                    self._visNoProgressSteps = 0
                 else:
-                    self._vis_no_progress_steps += 1
+                    self._visNoProgressSteps += 1
 
             if self.position == self.maze.end:
-                return self._finalize_visualization_episode()
+                return self._finalizeVisualizationEpisode()
 
         return False
 
-    def _finalize_visualization_episode(self) -> bool:
+    def _finalizeVisualizationEpisode(self) -> bool:
         """
         Finalize a visualization-only episode.
 
@@ -286,6 +290,6 @@ class QLearningBot(BaseBot):
         Q-table, rewards log, and profile stats untouched. Only reset local
         visualization state so a fresh episode can start on next call.
         """
-        self._vis_active = False
-        self._vis_initialized = False
+        self._visActive = False
+        self._visInitialized = False
         return True

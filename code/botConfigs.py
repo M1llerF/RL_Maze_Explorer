@@ -7,17 +7,17 @@ from typing import Any
 class QLearningConfig:
     def __init__(
         self,
-        learning_rate: float = 0.1,
-        discount_factor: float = 0.9,
-        use_position_in_state: bool = True,
+        learningRate: float = 0.1,
+        discountFactor: float = 0.9,
+        usePositionInState: bool = True,
     ) -> None:
         """
         Initialize Q-learning configuration with default learning rate and discount factor.
         """
-        self.learning_rate = learning_rate
-        self.discount_factor = discount_factor
+        self.learningRate = learningRate
+        self.discountFactor = discountFactor
         # If False, the Q-state key excludes absolute position, aiding generalization across mazes
-        self.use_position_in_state = use_position_in_state
+        self.usePositionInState = usePositionInState
 
     def customize(self) -> None:
         """
@@ -25,11 +25,11 @@ class QLearningConfig:
         Prompts the user to enter new values for learning rate and discount factor.
         If the user input is invalid or left blank, the default values are used.
         """
-        self.learning_rate = self._get_float_input("Enter learning rate (default 0.1): ", self.learning_rate)
-        self.discount_factor = self._get_float_input("Enter discount factor (default 0.9): ", self.discount_factor)
+        self.learningRate = self._getFloatInput("Enter learning rate (default 0.1): ", self.learningRate)
+        self.discountFactor = self._getFloatInput("Enter discount factor (default 0.9): ", self.discountFactor)
 
     @staticmethod
-    def _get_float_input(prompt: str, default: float) -> float:
+    def _getFloatInput(prompt: str, default: float) -> float:
         """
         Helper method to get a float input from the user.
         If the input is invalid or left blank, the default value is returned.
@@ -45,12 +45,12 @@ class QLearningConfig:
             return default
 
 # Define configurations for different bot types
-bot_configs: dict[str, dict[str, Any]] = {
+botConfigs: dict[str, dict[str, Any]] = {
     "QLearningBot": {
         "class": QLearningConfig,
         "params": {
-            "Learning Rate": "learning_rate",
-            "Discount Factor": "discount_factor"
+            "Learning Rate": "learningRate",
+            "Discount Factor": "discountFactor"
         },
         "rewards": {
             'goal_reached': 1000,
@@ -66,24 +66,24 @@ bot_configs: dict[str, dict[str, Any]] = {
 }
 
 
-def get_config_class_for_bot_type(bot_type: str | None) -> type[Any]:
+def getConfigClassForBotType(botType: str | None) -> type[Any]:
     """Return the config class registered for a bot type, defaulting to QLearningConfig."""
-    if bot_type and bot_type in bot_configs:
-        config_cls = bot_configs[bot_type].get("class")
-        if isinstance(config_cls, type):
-            return config_cls
+    if botType and botType in botConfigs:
+        configCls = botConfigs[botType].get("class")
+        if isinstance(configCls, type):
+            return configCls
     return QLearningConfig
 
 
-def build_config_for_bot_type(bot_type: str | None, raw_config: Any) -> Any:
+def buildConfigForBotType(botType: str | None, rawConfig: Any) -> Any:
     """Build a bot config instance from raw profile payload data."""
-    config_cls = get_config_class_for_bot_type(bot_type)
-    if isinstance(raw_config, config_cls):
-        return raw_config
+    configCls = getConfigClassForBotType(botType)
+    if isinstance(rawConfig, configCls):
+        return rawConfig
 
-    cfg_dict: dict[str, Any] = raw_config if isinstance(raw_config, dict) else {}
+    cfgDict: dict[str, Any] = rawConfig if isinstance(rawConfig, dict) else {}
     try:
-        signature = inspect.signature(config_cls)
+        signature = inspect.signature(configCls)
         allowed = {
             name
             for name in signature.parameters
@@ -94,8 +94,19 @@ def build_config_for_bot_type(bot_type: str | None, raw_config: Any) -> Any:
     except (TypeError, ValueError):
         allowed = set()
 
-    kwargs = {str(k): v for k, v in cfg_dict.items() if str(k) in allowed}
+    normalized: dict[str, Any] = {}
+    for k, v in cfgDict.items():
+        key = str(k)
+        normalized[key] = v
+        # Backward compatibility for legacy snake_case profile payload keys.
+        if "_" in key:
+            parts = [p for p in key.split("_") if p]
+            if parts:
+                camel = parts[0] + "".join(p[:1].upper() + p[1:] for p in parts[1:])
+                normalized.setdefault(camel, v)
+
+    kwargs = {k: v for k, v in normalized.items() if k in allowed}
     try:
-        return config_cls(**kwargs)
+        return configCls(**kwargs)
     except TypeError:
-        return config_cls()
+        return configCls()

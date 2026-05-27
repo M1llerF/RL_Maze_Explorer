@@ -7,64 +7,64 @@ import numpy as np
 
 # 0 up, 2 left, 1 down, 3 right
 class QTableChecker:
-    def __init__(self, q_table_file):
-        self.q_table_file = q_table_file
-        self.q_table = self.load_q_table()
+    def __init__(self, qTableFile):
+        self.qTableFile = qTableFile
+        self.qTable = self.loadQTable()
     
-    def load_q_table(self):
+    def loadQTable(self):
         try:
-            with open(self.q_table_file, 'rb') as f:
-                q_table = pickle.load(f)
-            return q_table
+            with open(self.qTableFile, 'rb') as f:
+                qTable = pickle.load(f)
+            return qTable
         except FileNotFoundError:
-            print(f"Q-table file {self.q_table_file} not found.")
+            print(f"Q-table file {self.qTableFile} not found.")
             return {}
     
-    def print_q_table_summary(self):
-        if not self.q_table:
+    def printQTableSummary(self):
+        if not self.qTable:
             print("Q-table is empty or not loaded.")
             return
         
-        num_states = len(self.q_table)
-        num_actions = len(next(iter(self.q_table.values())))
-        print(f"Q-table contains {num_states} states and {num_actions} actions per state.")
+        numStates = len(self.qTable)
+        numActions = len(next(iter(self.qTable.values())))
+        print(f"Q-table contains {numStates} states and {numActions} actions per state.")
     
-    def print_state_q_values(self, state):
-        if state in self.q_table:
-            q_values = self.q_table[state]
-            print(f"Q-values for state {state}: {q_values}")
+    def printStateQValues(self, state):
+        if state in self.qTable:
+            qValues = self.qTable[state]
+            print(f"Q-values for state {state}: {qValues}")
         else:
             print(f"State {state} not found in Q-table.")
     
-    def get_best_action_for_state(self, state):
-        if state in self.q_table:
-            best_action = np.argmax(self.q_table[state])
-            return best_action
+    def getBestActionForState(self, state):
+        if state in self.qTable:
+            bestAction = np.argmax(self.qTable[state])
+            return bestAction
         else:
             print(f"State {state} not found in Q-table.")
             return None
     
-    def print_top_states(self, top_n=1000):
-        sorted_states = sorted(self.q_table.keys(), key=lambda state: np.max(self.q_table[state]), reverse=True)
-        for i, state in enumerate(sorted_states[:top_n]):
-            best_action = np.argmax(self.q_table[state])
-            if(best_action == 0):
-                best_action = "Up"
-            elif(best_action == 1):
-                best_action = "Down"
-            elif(best_action == 2):
-                best_action = "Left"
-            elif(best_action == 3):
-                best_action = "Right"
+    def printTopStates(self, topN=1000):
+        sortedStates = sorted(self.qTable.keys(), key=lambda state: np.max(self.qTable[state]), reverse=True)
+        for i, state in enumerate(sortedStates[:topN]):
+            bestAction = np.argmax(self.qTable[state])
+            if(bestAction == 0):
+                bestAction = "Up"
+            elif(bestAction == 1):
+                bestAction = "Down"
+            elif(bestAction == 2):
+                bestAction = "Left"
+            elif(bestAction == 3):
+                bestAction = "Right"
 
-            best_q_value = np.max(self.q_table[state])
-            print(f"Rank {i+1}: State {state}, Best Action: {best_action}, Best Q-value: {best_q_value}")
+            bestQValue = np.max(self.qTable[state])
+            print(f"Rank {i+1}: State {state}, Best Action: {bestAction}, Best Q-value: {bestQValue}")
 
 if __name__ == "__main__":
     # Usage example for local debugging:
     # Point this to a q_table.pkl under profiles/<name>/
-    q_checker = QTableChecker('profiles/TEST/q_table.pkl')
-    q_checker.print_q_table_summary()
+    qChecker = QTableChecker('profiles/TEST/q_table.pkl')
+    qChecker.printQTableSummary()
     # q_checker.print_state_q_values(state)
     # q_checker.get_best_action_for_state(state)
-    q_checker.print_top_states(top_n=100)
+    qChecker.printTopStates(topN=100)

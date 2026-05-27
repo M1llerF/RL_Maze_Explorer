@@ -3,7 +3,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from typing import Any, cast
 
-from botConfigs import bot_configs, QLearningConfig
+from botConfigs import botConfigs, QLearningConfig
 from rewardSystem import RewardConfig
 from botProfile import BotProfile
 
@@ -12,12 +12,12 @@ class CreateEditProfileFrame(tk.Frame):
     def __init__(self, parent: Any, controller: Any) -> None:
         super().__init__(parent)
         self.controller = controller
-        self.current_config_widgets = []
-        self.param_vars = {}
-        self.reward_vars = {}
-        self.auto_vars = {}
-        self.param_entries = {}
-        self.reward_entries = {}
+        self.currentConfigWidgets = []
+        self.paramVars = {}
+        self.rewardVars = {}
+        self.autoVars = {}
+        self.paramEntries = {}
+        self.rewardEntries = {}
         self.profile: BotProfile | None = None
         try:
             self._style = ttk.Style()
@@ -28,147 +28,147 @@ class CreateEditProfileFrame(tk.Frame):
         ttk.Label(self, text="Create/Edit Profile", font=("TkDefaultFont", 20)).pack(pady=10, padx=10)
 
         ttk.Label(self, text="Profile Name:").pack()
-        self.profile_name_entry = ttk.Entry(self)
-        self.profile_name_entry.pack()
+        self.profileNameEntry = ttk.Entry(self)
+        self.profileNameEntry.pack()
 
         ttk.Label(self, text="Bot Type:").pack()
-        self.bot_type_entry = ttk.Combobox(self, values=list(bot_configs.keys()))
-        self.bot_type_entry.pack()
-        self.bot_type_entry.bind("<<ComboboxSelected>>", self.update_bot_config_ui)
+        self.botTypeEntry = ttk.Combobox(self, values=list(botConfigs.keys()))
+        self.botTypeEntry.pack()
+        self.botTypeEntry.bind("<<ComboboxSelected>>", self.updateBotConfigUi)
 
-        self.config_frame = ttk.Frame(self)
-        self.config_frame.pack(pady=10)
+        self.configFrame = ttk.Frame(self)
+        self.configFrame.pack(pady=10)
 
-        ttk.Button(self, text="Save", command=self.save_profile).pack(pady=10)
+        ttk.Button(self, text="Save", command=self.saveProfile).pack(pady=10)
         ttk.Button(self, text="Cancel", command=self.cancel).pack(pady=10)
 
     # ----- UI building -----
-    def update_bot_config_ui(self, event: Any = None) -> None:
-        for widget in self.current_config_widgets:
+    def updateBotConfigUi(self, event: Any = None) -> None:
+        for widget in self.currentConfigWidgets:
             widget.destroy()
-        self.current_config_widgets.clear()
-        self.param_vars.clear()
-        self.reward_vars.clear()
-        self.auto_vars.clear()
-        self.param_entries.clear()
+        self.currentConfigWidgets.clear()
+        self.paramVars.clear()
+        self.rewardVars.clear()
+        self.autoVars.clear()
+        self.paramEntries.clear()
 
-        bot_type = self.bot_type_entry.get()
-        if bot_type not in bot_configs:
+        botType = self.botTypeEntry.get()
+        if botType not in botConfigs:
             return
-        config = bot_configs[bot_type]
+        config = botConfigs[botType]
 
         # Parameters
         if "params" in config:
-            for param_name, param_key in config["params"].items():
-                row = ttk.Frame(self.config_frame)
+            for paramName, paramKey in config["params"].items():
+                row = ttk.Frame(self.configFrame)
                 row.pack(fill="x", pady=2)
-                label = ttk.Label(row, text=f"{param_name}:")
+                label = ttk.Label(row, text=f"{paramName}:")
                 label.pack(side=tk.LEFT)
                 var = tk.StringVar()
                 entry = ttk.Entry(row, textvariable=var, width=12)
                 entry.pack(side=tk.LEFT, padx=6)
-                self.current_config_widgets.extend([row, label, entry])
-                self.param_vars[param_key] = var
-                self.param_entries[param_key] = entry
+                self.currentConfigWidgets.extend([row, label, entry])
+                self.paramVars[paramKey] = var
+                self.paramEntries[paramKey] = entry
 
         # Rewards
         if "rewards" in config:
-            label = ttk.Label(self.config_frame, text="Reward Configuration:")
+            label = ttk.Label(self.configFrame, text="Reward Configuration:")
             label.pack()
-            self.current_config_widgets.append(label)
-            for reward_key, default_value in config["rewards"].items():
-                reward_label = ttk.Label(self.config_frame, text=reward_key)
-                reward_label.pack()
-                var = tk.StringVar(value=default_value)
-                reward_entry = ttk.Entry(self.config_frame, textvariable=var)
-                reward_entry.pack()
-                self.current_config_widgets.extend([reward_label, reward_entry])
-                self.reward_vars[reward_key] = var
-                self.reward_entries[reward_key] = reward_entry
+            self.currentConfigWidgets.append(label)
+            for rewardKey, defaultValue in config["rewards"].items():
+                rewardLabel = ttk.Label(self.configFrame, text=rewardKey)
+                rewardLabel.pack()
+                var = tk.StringVar(value=defaultValue)
+                rewardEntry = ttk.Entry(self.configFrame, textvariable=var)
+                rewardEntry.pack()
+                self.currentConfigWidgets.extend([rewardLabel, rewardEntry])
+                self.rewardVars[rewardKey] = var
+                self.rewardEntries[rewardKey] = rewardEntry
 
     # ----- Data binding -----
-    def load_profile(self, profile: Any = None) -> None:
+    def loadProfile(self, profile: Any = None) -> None:
         self.profile = profile
         if profile:
-            self.profile_name_entry.delete(0, tk.END)
-            self.profile_name_entry.insert(0, profile.name)
-            self.bot_type_entry.set(profile.bot_type)
-            self.update_bot_config_ui()
+            self.profileNameEntry.delete(0, tk.END)
+            self.profileNameEntry.insert(0, profile.name)
+            self.botTypeEntry.set(profile.botType)
+            self.updateBotConfigUi()
 
             if profile.config:
-                for param_key, var in self.param_vars.items():
-                    var.set(getattr(profile.config, param_key, ""))
+                for paramKey, var in self.paramVars.items():
+                    var.set(getattr(profile.config, paramKey, ""))
             # No algorithm-specific auto flags
 
-            if profile.reward_config:
-                for reward_key, var in self.reward_vars.items():
-                    var.set(profile.reward_config.reward_modifiers.get(reward_key, ""))
+            if profile.rewardConfig:
+                for rewardKey, var in self.rewardVars.items():
+                    var.set(profile.rewardConfig.rewardModifiers.get(rewardKey, ""))
 
     # ----- Actions -----
-    def save_profile(self) -> None:
-        profile_name = self.profile_name_entry.get()
-        bot_type = self.bot_type_entry.get()
+    def saveProfile(self) -> None:
+        profileName = self.profileNameEntry.get()
+        botType = self.botTypeEntry.get()
 
-        if bot_type not in bot_configs:
-            messagebox.showerror("Error", f"Unknown bot type: {bot_type}")
+        if botType not in botConfigs:
+            messagebox.showerror("Error", f"Unknown bot type: {botType}")
             return
-        if not profile_name.strip():
+        if not profileName.strip():
             messagebox.showerror("Error", "Profile name cannot be empty.")
             return
         import re
-        if not re.fullmatch(r"[A-Za-z0-9_-]+", profile_name.strip()):
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", profileName.strip()):
             messagebox.showerror("Error", "Profile name may only contain letters, numbers, '_' and '-'.")
             return
         try:
-            existing = set(self.controller.game_env.profile_manager.list_profiles())
-            if (self.profile is None or self.profile.name != profile_name) and profile_name in existing:
-                messagebox.showerror("Error", f"A profile named '{profile_name}' already exists.")
+            existing = set(self.controller.gameEnv.profileManager.listProfiles())
+            if (self.profile is None or self.profile.name != profileName) and profileName in existing:
+                messagebox.showerror("Error", f"A profile named '{profileName}' already exists.")
                 return
         except Exception:
             pass
 
-        for e in self.param_entries.values():
+        for e in self.paramEntries.values():
             try:
                 e.configure(style="TEntry")
             except Exception:
                 pass
-        for e in self.reward_entries.values():
+        for e in self.rewardEntries.values():
             try:
                 e.configure(style="TEntry")
             except Exception:
                 pass
 
-        bot_params = {}
-        param_errors = []
-        for param_key, var in self.param_vars.items():
+        botParams = {}
+        paramErrors = []
+        for paramKey, var in self.paramVars.items():
             txt = (var.get() or "").strip()
             if txt == "":
-                bot_params[param_key] = None
+                botParams[paramKey] = None
                 continue
             try:
-                bot_params[param_key] = float(txt)
+                botParams[paramKey] = float(txt)
             except Exception:
-                param_errors.append(param_key)
+                paramErrors.append(paramKey)
 
-        rewards_config = {}
-        reward_errors = []
-        for reward_key, var in self.reward_vars.items():
+        rewardsConfig = {}
+        rewardErrors = []
+        for rewardKey, var in self.rewardVars.items():
             txt = (var.get() or "").strip()
             try:
-                rewards_config[reward_key] = float(txt)
+                rewardsConfig[rewardKey] = float(txt)
             except Exception:
-                reward_errors.append(reward_key)
+                rewardErrors.append(rewardKey)
 
-        if param_errors or reward_errors:
-            for k in param_errors:
-                e = self.param_entries.get(k)
+        if paramErrors or rewardErrors:
+            for k in paramErrors:
+                e = self.paramEntries.get(k)
                 if e is not None:
                     try:
                         e.configure(style="Error.TEntry")
                     except Exception:
                         pass
-            for k in reward_errors:
-                e = self.reward_entries.get(k)
+            for k in rewardErrors:
+                e = self.rewardEntries.get(k)
                 if e is not None:
                     try:
                         e.configure(style="Error.TEntry")
@@ -177,43 +177,43 @@ class CreateEditProfileFrame(tk.Frame):
             def _format(keys, label):
                 return (label + ":\n  - " + "\n  - ".join(keys)) if keys else ""
             msg = "\n\n".join(filter(None, [
-                _format(param_errors, "Invalid parameters"),
-                _format(reward_errors, "Invalid rewards"),
+                _format(paramErrors, "Invalid parameters"),
+                _format(rewardErrors, "Invalid rewards"),
             ]))
             messagebox.showerror("Invalid Values", msg + "\n\nPlease fix these fields and try saving again.")
             return
 
-        if bot_type == "QLearningBot":
-            q_defaults = QLearningConfig()
-            bot_config = QLearningConfig(
-                learning_rate=cast(float, bot_params.get('learning_rate') if bot_params.get('learning_rate') is not None else q_defaults.learning_rate),
-                discount_factor=cast(float, bot_params.get('discount_factor') if bot_params.get('discount_factor') is not None else q_defaults.discount_factor),
-                use_position_in_state=bool(getattr(q_defaults, 'use_position_in_state', True))
+        if botType == "QLearningBot":
+            qDefaults = QLearningConfig()
+            botConfig = QLearningConfig(
+                learningRate=cast(float, botParams.get('learning_rate') if botParams.get('learning_rate') is not None else qDefaults.learningRate),
+                discountFactor=cast(float, botParams.get('discount_factor') if botParams.get('discount_factor') is not None else qDefaults.discountFactor),
+                usePositionInState=bool(getattr(qDefaults, 'use_position_in_state', True))
             )
         else:
-            bot_config = QLearningConfig()
+            botConfig = QLearningConfig()
 
-        reward_config_obj = RewardConfig()
-        reward_config_obj.reward_modifiers.update(rewards_config)
+        rewardConfigObj = RewardConfig()
+        rewardConfigObj.rewardModifiers.update(rewardsConfig)
 
         try:
-            self.controller.game_env.setup_new_profile(profile_name, bot_type, bot_config, reward_config_obj)
+            self.controller.gameEnv.setupNewProfile(profileName, botType, botConfig, rewardConfigObj)
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save profile: {e}")
             return
 
         try:
             # Initialize default mazes.json via repository
-            self.controller.game_env.repository.ensure_maze_file(profile_name)
+            self.controller.gameEnv.repository.ensureMazeFile(profileName)
         except Exception:
             pass
 
         messagebox.showinfo("Profile Saved", "Profile has been saved.")
 
-        self.controller.frames["ProfileManagementFrame"].load_profiles()
-        self.controller.frames["VisualizationFrame"].load_profiles()
-        self.controller.frames["BotTrainingFrame"].load_profiles()
-        self.controller.show_profile_management()
+        self.controller.frames["ProfileManagementFrame"].loadProfiles()
+        self.controller.frames["VisualizationFrame"].loadProfiles()
+        self.controller.frames["BotTrainingFrame"].loadProfiles()
+        self.controller.showProfileManagement()
 
     def cancel(self) -> None:
-        self.controller.show_profile_management()
+        self.controller.showProfileManagement()

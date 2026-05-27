@@ -5,7 +5,7 @@ import pickle
 import tempfile
 from typing import Any, cast
 
-from botConfigs import build_config_for_bot_type
+from botConfigs import buildConfigForBotType
 from rewardSystem import RewardConfig
 from botStatistics import BotStatistics
 
@@ -15,11 +15,11 @@ class BotProfile:
     def __init__(
         self,
         name: str,
-        bot_type: str,
+        botType: str,
         config: Any,
-        reward_config: RewardConfig,
+        rewardConfig: RewardConfig,
         statistics: BotStatistics,
-        bot_specific_data: dict[str, Any],
+        botSpecificData: dict[str, Any],
     ) -> None:
         """
         Initialize the BotProfile with the provided parameters.
@@ -32,32 +32,43 @@ class BotProfile:
         :param bot_specific_data: Additional data specific to the bot.
         """
         self.name = name
-        self.bot_type = bot_type
+        self.botType = botType
         self.config = config
-        self.reward_config = reward_config
+        self.rewardConfig = rewardConfig
         self.statistics = statistics
-        self.bot_specific_data = bot_specific_data
+        self.botSpecificData = botSpecificData
 
-    def to_dict(self) -> dict[str, Any]:
+    def toDict(self) -> dict[str, Any]:
         """
         Convert the profile to a dictionary.
 
         :return: A dictionary representation of the profile.
         """
-        config_data = self.config.__dict__ if hasattr(self.config, '__dict__') else self.config
-        reward_config_data = self.reward_config.__dict__ if hasattr(self.reward_config, '__dict__') else self.reward_config
-        statistics_data = self.statistics.__dict__ if hasattr(self.statistics, '__dict__') else self.statistics
+        configData = self.config.__dict__ if hasattr(self.config, '__dict__') else self.config
+        rewardConfigData = self.rewardConfig.__dict__ if hasattr(self.rewardConfig, '__dict__') else self.rewardConfig
+        statisticsData = self.statistics.__dict__ if hasattr(self.statistics, '__dict__') else self.statistics
         return {
             "name": self.name,
-            "bot_type": self.bot_type,
-            "config": config_data,
-            "reward_config": reward_config_data,
-            "statistics": statistics_data,
-            "bot_specific_data": self.bot_specific_data
+            "bot_type": self.botType,
+            "config": configData,
+            "reward_config": rewardConfigData,
+            "statistics": statisticsData,
+            "bot_specific_data": self.botSpecificData
         }
     
     @staticmethod
-    def from_dict(data: Any, default_name: str | None = None) -> BotProfile:
+    def _legacySnakeToCamel(d: dict[str, Any]) -> dict[str, Any]:
+        out = dict(d)
+        for key, value in d.items():
+            if "_" in key:
+                parts = [p for p in key.split("_") if p]
+                if parts:
+                    camel = parts[0] + "".join(p[:1].upper() + p[1:] for p in parts[1:])
+                    out.setdefault(camel, value)
+        return out
+
+    @staticmethod
+    def fromDict(data: Any, defaultName: str | None = None) -> BotProfile:
         """
         Create a BotProfile instance from a dictionary.
 
@@ -66,92 +77,92 @@ class BotProfile:
         """
         # Tolerant loader: handle missing keys and older profile schemas.
         d = dict(data or {})
-        name = d.get('name') or default_name or 'Unnamed'
+        name = d.get('name') or defaultName or 'Unnamed'
 
         # Infer bot type if missing
-        bot_type = d.get('bot_type')
-        cfg_raw = d.get('config')
-        if bot_type is None:
-            bot_type = 'QLearningBot'
+        botType = d.get('bot_type')
+        cfgRaw = d.get('config')
+        if botType is None:
+            botType = 'QLearningBot'
 
         # Build config using bot-type mapping; defaults to QLearning for legacy payloads.
-        config = build_config_for_bot_type(bot_type, cfg_raw)
+        config = buildConfigForBotType(botType, cfgRaw)
 
         # Reward config
-        reward_config = d.get('reward_config')
-        if isinstance(reward_config, dict):
-            reward_config = RewardConfig(**cast(dict[str, Any], reward_config))
-        elif not isinstance(reward_config, RewardConfig):
-            reward_config = RewardConfig()
+        rewardConfig = d.get('reward_config')
+        if isinstance(rewardConfig, dict):
+            rewardConfig = RewardConfig(**BotProfile._legacySnakeToCamel(cast(dict[str, Any], rewardConfig)))
+        elif not isinstance(rewardConfig, RewardConfig):
+            rewardConfig = RewardConfig()
 
         # Statistics
         statistics = d.get('statistics')
         if isinstance(statistics, dict):
             s = BotStatistics()
             try:
-                s.__dict__.update(cast(dict[str, Any], statistics))
+                s.__dict__.update(BotProfile._legacySnakeToCamel(cast(dict[str, Any], statistics)))
             except Exception:
                 pass
             statistics = s
         elif not isinstance(statistics, BotStatistics):
             statistics = BotStatistics()
 
-        raw_specific = d.get('bot_specific_data')
-        bot_specific_data: dict[str, Any] = (
-            cast(dict[str, Any], raw_specific) if isinstance(raw_specific, dict) else {}
+        rawSpecific = d.get('bot_specific_data')
+        botSpecificData: dict[str, Any] = (
+            cast(dict[str, Any], rawSpecific) if isinstance(rawSpecific, dict) else {}
         )
 
         return BotProfile(
             name=name,
-            bot_type=bot_type,
+            botType=botType,
             config=config,
-            reward_config=reward_config,
+            rewardConfig=rewardConfig,
             statistics=statistics,
-            bot_specific_data=bot_specific_data
+            botSpecificData=botSpecificData
         )
 
 class ProfileManager:
-    def __init__(self, profile_directory: str) -> None:
+    def __init__(self, profileDirectory: str) -> None:
         """
         Initialize the ProfileManager with a directory for storing profiles.
 
         :param profile_directory: The directory where profiles are stored.
         """
-        self.profile_directory = profile_directory
+        self.profileDirectory = profileDirectory
 
-    def save_profile(self, profile: BotProfile) -> None:
+    def saveProfile(self, profile: BotProfile) -> None:
         """
         Save a profile to a pickle file and create necessary files.
 
         :param profile: The BotProfile instance to save.
         """
-        profile_dir = f"{self.profile_directory}/{profile.name}"
-        os.makedirs(profile_dir, exist_ok=True)
-        filename = f"{profile_dir}/profile.pkl"
+        profileDir = f"{self.profileDirectory}/{profile.name}"
+        os.makedirs(profileDir, exist_ok=True)
+        filename = f"{profileDir}/profile.pkl"
         
         # Atomic write to avoid partial reads by other threads
-        profile_dict = profile.to_dict()
-        dir_path = os.path.dirname(filename)
-        os.makedirs(dir_path, exist_ok=True)
-        with tempfile.NamedTemporaryFile(delete=False, dir=dir_path, mode='wb') as tmp:
-            pickle.dump(profile_dict, tmp)
-            temp_name = tmp.name
-        os.replace(temp_name, filename)
+        profileDict = profile.toDict()
+        dirPath = os.path.dirname(filename)
+        os.makedirs(dirPath, exist_ok=True)
+        with tempfile.NamedTemporaryFile(delete=False, dir=dirPath, mode='wb') as tmp:
+            pickle.dump(profileDict, tmp)
+            tempName = tmp.name
+        os.replace(tempName, filename)
 
         # Avoid creating empty q_table.pkl to prevent EOFError on first load.
-        self._create_empty_file(os.path.join(profile_dir, "SimulationRewards.txt"))
-        self._create_empty_file(os.path.join(profile_dir, "HeatmapData.txt"))
+        self._createEmptyFile(os.path.join(profileDir, "SimulationRewards.txt"))
+        self._createEmptyFile(os.path.join(profileDir, "HeatmapData.txt"))
 
 
-    def load_profile(self, profile_name: str) -> BotProfile:
+    def loadProfile(self, profileName: str) -> BotProfile:
         """
         Load a profile from a pickle file.
 
         :param profile_name: The name of the profile to load.
         :return: A BotProfile instance.
         """
-        profile_dir = f"{self.profile_directory}/{profile_name}"
-        filename = f"{profile_dir}/profile.pkl"
+        profileDir = f"{self.profileDirectory}/{profileName}"
+        filename = f"{profileDir}/profile.pkl"
 
         # Handle occasional concurrent-write races gracefully
         try:
@@ -161,18 +172,18 @@ class ProfileManager:
             # If a write was in progress, retry once
             with open(filename, 'rb') as f:
                 data = pickle.load(f)
-        return BotProfile.from_dict(data, default_name=profile_name)
+        return BotProfile.fromDict(data, defaultName=profileName)
     
-    def list_profiles(self) -> list[str]:
+    def listProfiles(self) -> list[str]:
         """
         List all available profiles.
 
         :return: A list of profile names.
         """
-        return [d for d in os.listdir(self.profile_directory) if os.path.isdir(os.path.join(self.profile_directory, d))]
+        return [d for d in os.listdir(self.profileDirectory) if os.path.isdir(os.path.join(self.profileDirectory, d))]
 
     @staticmethod
-    def _create_empty_file(filepath: str) -> None:
+    def _createEmptyFile(filepath: str) -> None:
         """
         Create a empty file if it doesn't exist.
 

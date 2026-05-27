@@ -9,46 +9,46 @@ from typing import Any, cast
 
 class DisplayTools:
     @staticmethod
-    def create_frame(parent: Any, controller: Any, title: str) -> tk.Frame:
+    def createFrame(parent: Any, controller: Any, title: str) -> tk.Frame:
         frame = tk.Frame(parent)
         ttk.Label(frame, text=title, font=("TkDefaultFont", 20)).pack(pady=10, padx=10)
         return frame
 
     @staticmethod
-    def load_profiles(profile_manager: Any, listbox: Any) -> None:
-        profiles = profile_manager.list_profiles()
+    def loadProfiles(profileManager: Any, listbox: Any) -> None:
+        profiles = profileManager.listProfiles()
         listbox.delete(0, tk.END)
         for profile in profiles:
             listbox.insert(tk.END, profile)
 
     @staticmethod
-    def delete_profile(profile_manager: Any, listbox: Any) -> None:
-        selected_index = listbox.curselection()
-        if not selected_index:
+    def deleteProfile(profileManager: Any, listbox: Any) -> None:
+        selectedIndex = listbox.curselection()
+        if not selectedIndex:
             messagebox.showerror("Error", "No profile selected.")
             return
 
-        profile_name = listbox.get(selected_index)
-        profile_dir = f"{profile_manager.profile_directory}/{profile_name}"
+        profileName = listbox.get(selectedIndex)
+        profileDir = f"{profileManager.profileDirectory}/{profileName}"
 
         try:
-            if os.path.exists(profile_dir):
-                shutil.rmtree(profile_dir)
-            profile_pkl = f"{profile_manager.profile_directory}/{profile_name}.pkl"
-            if os.path.exists(profile_pkl):
-                os.remove(profile_pkl)
+            if os.path.exists(profileDir):
+                shutil.rmtree(profileDir)
+            profilePkl = f"{profileManager.profileDirectory}/{profileName}.pkl"
+            if os.path.exists(profilePkl):
+                os.remove(profilePkl)
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to delete profile '{profile_name}'. Error: {e}")
+            messagebox.showerror("Error", f"Failed to delete profile '{profileName}'. Error: {e}")
         finally:
-            listbox.delete(selected_index)
+            listbox.delete(selectedIndex)
 
     @staticmethod
-    def display_heatmap(
+    def displayHeatmap(
         canvas: Any,
         maze: list[list[int]] | None,
         start: tuple[int, int],
         end: tuple[int, int],
-        heatmap_data: dict[tuple[int, int], int],
+        heatmapData: dict[tuple[int, int], int],
     ) -> None:
         # Clear the canvas
         canvas.delete("all")
@@ -56,36 +56,36 @@ class DisplayTools:
         if maze is None:
             return
 
-        maze_width = len(maze[0])
-        maze_height = len(maze)
-        cell_width = canvas.winfo_width() / maze_width
-        cell_height = canvas.winfo_height() / maze_height
+        mazeWidth = len(maze[0])
+        mazeHeight = len(maze)
+        cellWidth = canvas.winfo_width() / mazeWidth
+        cellHeight = canvas.winfo_height() / mazeHeight
 
-        heatmap = np.zeros((maze_height, maze_width))
-        for (x, y), count in heatmap_data.items():
+        heatmap = np.zeros((mazeHeight, mazeWidth))
+        for (x, y), count in heatmapData.items():
             heatmap[x, y] = count
 
-        max_heat = heatmap.max() if heatmap.max() > 0 else 1  # Avoid division by zero
+        maxHeat = heatmap.max() if heatmap.max() > 0 else 1  # Avoid division by zero
         cmap = plt.get_cmap("Reds")
 
-        for y in range(maze_height):
-            for x in range(maze_width):
+        for y in range(mazeHeight):
+            for x in range(mazeWidth):
                 if maze[y][x] == 1:
-                    canvas.create_rectangle(x * cell_width, y * cell_height,
-                                                         (x + 1) * cell_width, (y + 1) * cell_height,
+                    canvas.create_rectangle(x * cellWidth, y * cellHeight,
+                                                         (x + 1) * cellWidth, (y + 1) * cellHeight,
                                                          fill="black")
                 else:
-                    heat_value = heatmap[y, x] / max_heat
-                    if heat_value > 0:
-                        color = mcolors.to_hex(cast(Any, cmap(heat_value)))
-                        canvas.create_rectangle(x * cell_width, y * cell_height,
-                                                             (x + 1) * cell_width, (y + 1) * cell_height,
+                    heatValue = heatmap[y, x] / maxHeat
+                    if heatValue > 0:
+                        color = mcolors.to_hex(cast(Any, cmap(heatValue)))
+                        canvas.create_rectangle(x * cellWidth, y * cellHeight,
+                                                             (x + 1) * cellWidth, (y + 1) * cellHeight,
                                                              fill=color, outline=color)
 
-        canvas.create_rectangle(start[1] * cell_width, start[0] * cell_height,
-                                             (start[1] + 1) * cell_width, (start[0] + 1) * cell_height,
+        canvas.create_rectangle(start[1] * cellWidth, start[0] * cellHeight,
+                                             (start[1] + 1) * cellWidth, (start[0] + 1) * cellHeight,
                                              fill="blue")
 
-        canvas.create_rectangle(end[1] * cell_width, end[0] * cell_height,
-                                             (end[1] + 1) * cell_width, (end[0] + 1) * cell_height,
+        canvas.create_rectangle(end[1] * cellWidth, end[0] * cellHeight,
+                                             (end[1] + 1) * cellWidth, (end[0] + 1) * cellHeight,
                                              fill="green")

@@ -6,11 +6,11 @@ from typing import Any, cast
 
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-CODE_DIR = os.path.join(ROOT, "code")
-if CODE_DIR not in sys.path:
-    sys.path.insert(0, CODE_DIR)
+CODEDIR = os.path.join(ROOT, "code")
+if CODEDIR not in sys.path:
+    sys.path.insert(0, CODEDIR)
 
-from botConfigs import QLearningConfig, bot_configs
+from botConfigs import QLearningConfig, botConfigs
 from botFactory import BotFactory
 from botProfile import BotProfile, ProfileManager
 from botStatistics import BotStatistics
@@ -28,7 +28,7 @@ class _DummyMaze:
         self.grid = [[0, 0], [0, 0]]
         self.end = (1, 1)
 
-    def is_valid_position(self, _profile_name: str, row: int, col: int) -> bool:
+    def isValidPosition(self, _profileName: str, row: int, col: int) -> bool:
         return 0 <= row < self.height and 0 <= col < self.width
 
 
@@ -37,23 +37,23 @@ class _CtorWithRepository:
         self,
         maze: Any,
         config: Any,
-        reward_system: Any,
+        rewardSystem: Any,
         statistics: Any,
-        profile_name: str,
+        profileName: str,
         repository: ArtifactsRepository | None = None,
     ) -> None:
         self.received = {
             "maze": maze,
             "config": config,
-            "reward_system": reward_system,
+            "reward_system": rewardSystem,
             "statistics": statistics,
-            "profile_name": profile_name,
+            "profile_name": profileName,
             "repository": repository,
         }
-        self.specific_data = None
+        self.specificData = None
 
-    def initialize_specific_data(self, data: dict[str, Any]) -> None:
-        self.specific_data = data
+    def initializeSpecificData(self, data: dict[str, Any]) -> None:
+        self.specificData = data
 
 
 class _LegacyCtorNoRepository:
@@ -61,21 +61,21 @@ class _LegacyCtorNoRepository:
         self,
         maze: Any,
         config: Any,
-        reward_system: Any,
+        rewardSystem: Any,
         statistics: Any,
-        profile_name: str,
+        profileName: str,
     ) -> None:
         self.received = {
             "maze": maze,
             "config": config,
-            "reward_system": reward_system,
+            "reward_system": rewardSystem,
             "statistics": statistics,
-            "profile_name": profile_name,
+            "profile_name": profileName,
         }
-        self.specific_data = None
+        self.specificData = None
 
-    def initialize_specific_data(self, data: dict[str, Any]) -> None:
-        self.specific_data = data
+    def initializeSpecificData(self, data: dict[str, Any]) -> None:
+        self.specificData = data
 
 
 class _FutureConfig:
@@ -85,47 +85,47 @@ class _FutureConfig:
 
 
 class _RunnerDummyTools:
-    def get_optimal_path_info(self, _start: tuple[int, int], _end: tuple[int, int], output: str = "path") -> list[tuple[int, int]]:
+    def getOptimalPathInfo(self, _start: tuple[int, int], _end: tuple[int, int], output: str = "path") -> list[tuple[int, int]]:
         return [(0, 0), (0, 1)]
 
-    def calculate_next_position(self, _pos: tuple[int, int], _action: int) -> tuple[int, int]:
+    def calculateNextPosition(self, _pos: tuple[int, int], _action: int) -> tuple[int, int]:
         return (0, 1)
 
 
 class _RunnerDummyStats:
     def __init__(self) -> None:
-        self.times_revisited_squares = 0
-        self.non_repeating_steps_taken = 0
-        self.total_steps = 0
+        self.timesRevisitedSquares = 0
+        self.nonRepeatingStepsTaken = 0
+        self.totalSteps = 0
         self._visited: dict[tuple[int, int], int] = {}
 
-    def get_visited_positions(self) -> dict[tuple[int, int], int]:
+    def getVisitedPositions(self) -> dict[tuple[int, int], int]:
         return self._visited
 
-    def update_last_visited(self, _pos: tuple[int, int]) -> None:
+    def updateLastVisited(self, _pos: tuple[int, int]) -> None:
         return
 
-    def update_visited_positions(self, pos: tuple[int, int]) -> None:
+    def updateVisitedPositions(self, pos: tuple[int, int]) -> None:
         self._visited[pos] = self._visited.get(pos, 0) + 1
 
 
 class _RunnerDummyRewardSystem:
-    def get_reward(self, *_args: Any, **_kwargs: Any) -> float:
+    def getReward(self, *_args: Any, **_kwargs: Any) -> float:
         return 1.0
 
 
 class _RunnerDummyQ:
     def __init__(self) -> None:
-        self.total_steps = 0
+        self.totalSteps = 0
         self.saved = False
 
-    def choose_action(self, _state: Any, _stats: Any) -> int:
+    def chooseAction(self, _state: Any, _stats: Any) -> int:
         return 0
 
-    def update_q_value(self, _state: Any, _action: int, _reward: float, _new_state: Any) -> None:
+    def updateQValue(self, _state: Any, _action: int, _reward: float, _newState: Any) -> None:
         return
 
-    def save_q_table(self) -> None:
+    def saveQTable(self) -> None:
         self.saved = True
 
 
@@ -133,16 +133,16 @@ class _RunnerDummyRepo:
     def __init__(self) -> None:
         self.calls: list[str] = []
 
-    def save_maze_episode(self, *_args: Any, **_kwargs: Any) -> None:
+    def saveMazeEpisode(self, *_args: Any, **_kwargs: Any) -> None:
         self.calls.append("save_maze_episode")
 
-    def update_steps_from_heatmap(self, *_args: Any, **_kwargs: Any) -> None:
+    def updateStepsFromHeatmap(self, *_args: Any, **_kwargs: Any) -> None:
         self.calls.append("update_steps_from_heatmap")
 
-    def increment_times_hit_wall(self, *_args: Any, **_kwargs: Any) -> None:
+    def incrementTimesHitWall(self, *_args: Any, **_kwargs: Any) -> None:
         self.calls.append("increment_times_hit_wall")
 
-    def append_reward(self, *_args: Any, **_kwargs: Any) -> None:
+    def appendReward(self, *_args: Any, **_kwargs: Any) -> None:
         self.calls.append("append_reward")
 
 
@@ -153,56 +153,56 @@ class _RunnerDummyMaze:
     height = 1
     grid = [[0, 0]]
 
-    def is_valid_position(self, _profile_name: str, row: int, col: int) -> bool:
+    def isValidPosition(self, _profileName: str, row: int, col: int) -> bool:
         return row == 0 and col in (0, 1)
 
-    def get_start(self) -> tuple[int, int]:
+    def getStart(self) -> tuple[int, int]:
         return self.start
 
 
 class _VizDummyRepo:
     def __init__(self) -> None:
-        self.persist_calls = 0
+        self.persistCalls = 0
 
-    def load_q_table(self, _profile: str) -> dict[Any, Any]:
+    def loadQTable(self, _profile: str) -> dict[Any, Any]:
         return {}
 
-    def ensure_maze_file(self, _profile: str) -> None:
+    def ensureMazeFile(self, _profile: str) -> None:
         return
 
-    def load_maze_data(self, _profile: str) -> dict[str, Any]:
+    def loadMazeData(self, _profile: str) -> dict[str, Any]:
         return {"highest": {"reward": float("-inf")}, "lowest": {"reward": float("inf")}}
 
-    def save_q_table(self, _profile: str, _q_table: dict[Any, Any]) -> None:
-        self.persist_calls += 1
+    def saveQTable(self, _profile: str, _qTable: dict[Any, Any]) -> None:
+        self.persistCalls += 1
 
-    def save_maze_episode(self, *_args: Any, **_kwargs: Any) -> None:
-        self.persist_calls += 1
+    def saveMazeEpisode(self, *_args: Any, **_kwargs: Any) -> None:
+        self.persistCalls += 1
 
-    def update_steps_from_heatmap(self, *_args: Any, **_kwargs: Any) -> None:
-        self.persist_calls += 1
+    def updateStepsFromHeatmap(self, *_args: Any, **_kwargs: Any) -> None:
+        self.persistCalls += 1
 
-    def increment_times_hit_wall(self, *_args: Any, **_kwargs: Any) -> None:
-        self.persist_calls += 1
+    def incrementTimesHitWall(self, *_args: Any, **_kwargs: Any) -> None:
+        self.persistCalls += 1
 
-    def append_reward(self, *_args: Any, **_kwargs: Any) -> None:
-        self.persist_calls += 1
+    def appendReward(self, *_args: Any, **_kwargs: Any) -> None:
+        self.persistCalls += 1
 
 
 class TypingRegressionTests(unittest.TestCase):
-    def test_profile_from_dict_uses_defaults_on_missing_or_none_data(self) -> None:
-        bot_profile_cls: Any = BotProfile
-        profile: Any = bot_profile_cls.from_dict(None, default_name="fallback")
+    def testProfileFromDictUsesDefaultsOnMissingOrNoneData(self) -> None:
+        botProfileCls: Any = BotProfile
+        profile: Any = botProfileCls.fromDict(None, defaultName="fallback")
         self.assertEqual(profile.name, "fallback")
-        self.assertEqual(profile.bot_type, "QLearningBot")
+        self.assertEqual(profile.botType, "QLearningBot")
         self.assertIsInstance(profile.config, QLearningConfig)
-        self.assertIsInstance(profile.reward_config, RewardConfig)
+        self.assertIsInstance(profile.rewardConfig, RewardConfig)
         self.assertIsInstance(profile.statistics, BotStatistics)
-        self.assertEqual(profile.bot_specific_data, {})
+        self.assertEqual(profile.botSpecificData, {})
 
-    def test_profile_from_dict_ignores_unknown_config_keys(self) -> None:
-        bot_profile_cls: Any = BotProfile
-        profile: Any = bot_profile_cls.from_dict(
+    def testProfileFromDictIgnoresUnknownConfigKeys(self) -> None:
+        botProfileCls: Any = BotProfile
+        profile: Any = botProfileCls.fromDict(
             {
                 "name": "p1",
                 "config": {
@@ -213,57 +213,57 @@ class TypingRegressionTests(unittest.TestCase):
                 },
             }
         )
-        self.assertEqual(profile.config.learning_rate, 0.25)
-        self.assertEqual(profile.config.discount_factor, 0.8)
-        self.assertFalse(profile.config.use_position_in_state)
+        self.assertEqual(profile.config.learningRate, 0.25)
+        self.assertEqual(profile.config.discountFactor, 0.8)
+        self.assertFalse(profile.config.usePositionInState)
         self.assertFalse(hasattr(profile.config, "unexpected"))
 
-    def test_profile_from_dict_defaults_to_qlearning_for_unknown_bot_type(self) -> None:
-        bot_profile_cls: Any = BotProfile
-        profile: Any = bot_profile_cls.from_dict(
+    def testProfileFromDictDefaultsToQlearningForUnknownBotType(self) -> None:
+        botProfileCls: Any = BotProfile
+        profile: Any = botProfileCls.fromDict(
             {
                 "name": "p-unknown",
                 "bot_type": "FutureUnknownBot",
                 "config": {"learning_rate": 0.33, "discount_factor": 0.77},
             }
         )
-        self.assertEqual(profile.bot_type, "FutureUnknownBot")
+        self.assertEqual(profile.botType, "FutureUnknownBot")
         self.assertIsInstance(profile.config, QLearningConfig)
-        self.assertEqual(profile.config.learning_rate, 0.33)
-        self.assertEqual(profile.config.discount_factor, 0.77)
+        self.assertEqual(profile.config.learningRate, 0.33)
+        self.assertEqual(profile.config.discountFactor, 0.77)
 
-    def test_profile_from_dict_uses_registered_config_class_for_bot_type(self) -> None:
-        bot_configs["FutureBot"] = {"class": _FutureConfig}
-        self.addCleanup(lambda: bot_configs.pop("FutureBot", None))
-        bot_profile_cls: Any = BotProfile
-        profile: Any = bot_profile_cls.from_dict(
+    def testProfileFromDictUsesRegisteredConfigClassForBotType(self) -> None:
+        botConfigs["FutureBot"] = {"class": _FutureConfig}
+        self.addCleanup(lambda: botConfigs.pop("FutureBot", None))
+        botProfileCls: Any = BotProfile
+        profile: Any = botProfileCls.fromDict(
             {
                 "name": "p-future",
                 "bot_type": "FutureBot",
                 "config": {"alpha": 1.5, "beta": 4, "ignored": 123},
             }
         )
-        self.assertEqual(profile.bot_type, "FutureBot")
+        self.assertEqual(profile.botType, "FutureBot")
         self.assertIsInstance(profile.config, _FutureConfig)
         self.assertEqual(profile.config.alpha, 1.5)
         self.assertEqual(profile.config.beta, 4)
         self.assertFalse(hasattr(profile.config, "ignored"))
 
-    def test_profile_from_dict_tolerates_non_dict_reward_and_statistics(self) -> None:
-        bot_profile_cls: Any = BotProfile
-        profile: Any = bot_profile_cls.from_dict(
+    def testProfileFromDictToleratesNonDictRewardAndStatistics(self) -> None:
+        botProfileCls: Any = BotProfile
+        profile: Any = botProfileCls.fromDict(
             {
                 "name": "p2",
                 "reward_config": "not-a-dict",
                 "statistics": ["not", "a", "dict"],
             }
         )
-        self.assertIsInstance(profile.reward_config, RewardConfig)
+        self.assertIsInstance(profile.rewardConfig, RewardConfig)
         self.assertIsInstance(profile.statistics, BotStatistics)
 
-    def test_profile_from_dict_keeps_unknown_statistics_fields_from_dict(self) -> None:
-        bot_profile_cls: Any = BotProfile
-        profile: Any = bot_profile_cls.from_dict(
+    def testProfileFromDictKeepsUnknownStatisticsFieldsFromDict(self) -> None:
+        botProfileCls: Any = BotProfile
+        profile: Any = botProfileCls.fromDict(
             {
                 "name": "p3",
                 "statistics": {
@@ -272,16 +272,16 @@ class TypingRegressionTests(unittest.TestCase):
                 },
             }
         )
-        self.assertEqual(profile.statistics.total_steps, 123)
+        self.assertEqual(profile.statistics.totalSteps, 123)
         self.assertEqual(getattr(profile.statistics, "custom_counter"), "legacy-value")
 
-    def test_bot_factory_rejects_unknown_bot_type(self) -> None:
+    def testBotFactoryRejectsUnknownBotType(self) -> None:
         factory: Any = BotFactory(_DummyMaze())
         with self.assertRaisesRegex(
             ValueError,
             r"Unknown bot type: MissingBot\. Registered bot types: <none>",
         ):
-            factory.create_bot(
+            factory.createBot(
                 "MissingBot",
                 "profile",
                 QLearningConfig(),
@@ -290,22 +290,22 @@ class TypingRegressionTests(unittest.TestCase):
                 {},
             )
 
-    def test_bot_factory_registry_helpers(self) -> None:
+    def testBotFactoryRegistryHelpers(self) -> None:
         factory: Any = BotFactory(_DummyMaze())
-        self.assertFalse(factory.is_registered("QLearningBot"))
-        factory.register_bot("ZBot", _LegacyCtorNoRepository)
-        factory.register_bot("ABot", _LegacyCtorNoRepository)
-        self.assertTrue(factory.is_registered("ZBot"))
-        self.assertEqual(factory.list_registered_bot_types(), ["ABot", "ZBot"])
+        self.assertFalse(factory.isRegistered("QLearningBot"))
+        factory.registerBot("ZBot", _LegacyCtorNoRepository)
+        factory.registerBot("ABot", _LegacyCtorNoRepository)
+        self.assertTrue(factory.isRegistered("ZBot"))
+        self.assertEqual(factory.listRegisteredBotTypes(), ["ABot", "ZBot"])
 
-    def test_bot_factory_passes_repository_when_ctor_supports_it(self) -> None:
-        repo = ArtifactsRepository(base_dir=os.path.join(ROOT, "profiles"))
+    def testBotFactoryPassesRepositoryWhenCtorSupportsIt(self) -> None:
+        repo = ArtifactsRepository(baseDir=os.path.join(ROOT, "profiles"))
         factory: Any = BotFactory(_DummyMaze(), repository=repo)
-        factory.register_bot("RepoCtor", _CtorWithRepository)
+        factory.registerBot("RepoCtor", _CtorWithRepository)
 
         bot: _CtorWithRepository = cast(
             _CtorWithRepository,
-            factory.create_bot(
+            factory.createBot(
             "RepoCtor",
             "profileA",
             QLearningConfig(),
@@ -315,15 +315,15 @@ class TypingRegressionTests(unittest.TestCase):
             ),
         )
         self.assertIs(bot.received["repository"], repo)
-        self.assertEqual(bot.specific_data, {"k": "v"})
+        self.assertEqual(bot.specificData, {"k": "v"})
 
-    def test_bot_factory_falls_back_for_legacy_constructor(self) -> None:
+    def testBotFactoryFallsBackForLegacyConstructor(self) -> None:
         factory: Any = BotFactory(_DummyMaze())
-        factory.register_bot("LegacyCtor", _LegacyCtorNoRepository)
+        factory.registerBot("LegacyCtor", _LegacyCtorNoRepository)
 
         bot: _LegacyCtorNoRepository = cast(
             _LegacyCtorNoRepository,
-            factory.create_bot(
+            factory.createBot(
             "LegacyCtor",
             "profileB",
             QLearningConfig(),
@@ -333,108 +333,108 @@ class TypingRegressionTests(unittest.TestCase):
             ),
         )
         self.assertEqual(bot.received["profile_name"], "profileB")
-        self.assertEqual(bot.specific_data, {"legacy": 1})
+        self.assertEqual(bot.specificData, {"legacy": 1})
 
-    def test_qlearning_state_to_key_accepts_mixed_runtime_types(self) -> None:
+    def testQlearningStateToKeyAcceptsMixedRuntimeTypes(self) -> None:
         q = QLearning(QLearningConfig())
         state = ("state-id", ("wall", 2), {"direction": "N"})
-        q_any: Any = q
-        key: tuple[Any, ...] = cast(tuple[Any, ...], q_any.state_to_key(state))
+        qAny: Any = q
+        key: tuple[Any, ...] = cast(tuple[Any, ...], qAny.stateToKey(state))
         self.assertEqual(key, state)
 
-    def test_runner_uses_explicit_start_step_end_lifecycle(self) -> None:
+    def testRunnerUsesExplicitStartStepEndLifecycle(self) -> None:
         class _DummyBot:
             def __init__(self) -> None:
                 self.tools = _RunnerDummyTools()
                 self.maze = _RunnerDummyMaze()
                 self.statistics = _RunnerDummyStats()
-                self.reward_system = _RunnerDummyRewardSystem()
-                self.q_learning = _RunnerDummyQ()
+                self.rewardSystem = _RunnerDummyRewardSystem()
+                self.qLearning = _RunnerDummyQ()
                 self.repo = _RunnerDummyRepo()
-                self.profile_name = "runner-test"
+                self.profileName = "runner-test"
                 self.position = (0, 0)
                 self.state = ("s",)
-                self.total_reward = 0.0
-                self.episode_counter = 0
+                self.totalReward = 0.0
+                self.episodeCounter = 0
                 self.hooks: list[str] = []
 
-            def calculate_state(self, position: tuple[int, int] | None = None) -> tuple[Any, ...]:
+            def calculateState(self, position: tuple[int, int] | None = None) -> tuple[Any, ...]:
                 p = self.position if position is None else position
                 return (p,)
 
-            def on_episode_start(self, mode: str) -> None:
+            def onEpisodeStart(self, mode: str) -> None:
                 self.hooks.append(f"start:{mode}")
 
-            def on_episode_step(self, mode: str, _step_index: int) -> None:
+            def onEpisodeStep(self, mode: str, _stepIndex: int) -> None:
                 self.hooks.append(f"step:{mode}")
 
-            def on_episode_end(self, mode: str, outcome: str) -> None:
+            def onEpisodeEnd(self, mode: str, outcome: str) -> None:
                 self.hooks.append(f"end:{mode}:{outcome}")
 
         bot = _DummyBot()
         runner = QLearningEpisodeRunner(bot)
-        runner.run_episode()
+        runner.runEpisode()
 
         self.assertGreaterEqual(len(bot.hooks), 3)
         self.assertEqual(bot.hooks[0], "start:training")
         self.assertIn("step:training", bot.hooks)
         self.assertTrue(bot.hooks[-1].startswith("end:training:"))
-        self.assertEqual(bot.episode_counter, 1)
-        self.assertTrue(bot.q_learning.saved)
+        self.assertEqual(bot.episodeCounter, 1)
+        self.assertTrue(bot.qLearning.saved)
         self.assertIn("append_reward", bot.repo.calls)
 
-    def test_repository_model_artifact_bytes_round_trip(self) -> None:
+    def testRepositoryModelArtifactBytesRoundTrip(self) -> None:
         with tempfile.TemporaryDirectory() as td:
-            repo = ArtifactsRepository(base_dir=td)
+            repo = ArtifactsRepository(baseDir=td)
             payload = b"\x01\x02future-model"
-            repo.save_model_artifact_bytes("p1", "weights.bin", payload)
-            loaded = repo.load_model_artifact_bytes("p1", "weights.bin")
+            repo.saveModelArtifactBytes("p1", "weights.bin", payload)
+            loaded = repo.loadModelArtifactBytes("p1", "weights.bin")
             self.assertEqual(loaded, payload)
 
-    def test_repository_model_artifact_rejects_path_traversal_name(self) -> None:
+    def testRepositoryModelArtifactRejectsPathTraversalName(self) -> None:
         with tempfile.TemporaryDirectory() as td:
-            repo = ArtifactsRepository(base_dir=td)
+            repo = ArtifactsRepository(baseDir=td)
             with self.assertRaisesRegex(ValueError, r"Invalid artifact name"):
-                repo.save_model_artifact_bytes("p1", "../weights.bin", b"x")
+                repo.saveModelArtifactBytes("p1", "../weights.bin", b"x")
 
-    def test_profile_manager_round_trip_qlearning_profile(self) -> None:
+    def testProfileManagerRoundTripQlearningProfile(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             manager = ProfileManager(td)
             src = BotProfile(
                 name="roundtrip_a",
-                bot_type="QLearningBot",
-                config=QLearningConfig(learning_rate=0.2, discount_factor=0.85, use_position_in_state=False),
-                reward_config=RewardConfig(),
+                botType="QLearningBot",
+                config=QLearningConfig(learningRate=0.2, discountFactor=0.85, usePositionInState=False),
+                rewardConfig=RewardConfig(),
                 statistics=BotStatistics(),
-                bot_specific_data={"tag": "x"},
+                botSpecificData={"tag": "x"},
             )
-            manager.save_profile(src)
-            loaded = manager.load_profile("roundtrip_a")
+            manager.saveProfile(src)
+            loaded = manager.loadProfile("roundtrip_a")
             self.assertEqual(loaded.name, "roundtrip_a")
-            self.assertEqual(loaded.bot_type, "QLearningBot")
+            self.assertEqual(loaded.botType, "QLearningBot")
             self.assertIsInstance(loaded.config, QLearningConfig)
-            self.assertEqual(loaded.config.learning_rate, 0.2)
-            self.assertEqual(loaded.config.discount_factor, 0.85)
-            self.assertFalse(loaded.config.use_position_in_state)
-            self.assertEqual(loaded.bot_specific_data.get("tag"), "x")
+            self.assertEqual(loaded.config.learningRate, 0.2)
+            self.assertEqual(loaded.config.discountFactor, 0.85)
+            self.assertFalse(loaded.config.usePositionInState)
+            self.assertEqual(loaded.botSpecificData.get("tag"), "x")
 
-    def test_visualization_step_does_not_persist_training_artifacts(self) -> None:
+    def testVisualizationStepDoesNotPersistTrainingArtifacts(self) -> None:
         maze = _RunnerDummyMaze()
-        reward_system = RewardSystem(maze, RewardConfig())
+        rewardSystem = RewardSystem(maze, RewardConfig())
         stats = BotStatistics()
         repo = _VizDummyRepo()
         bot = QLearningBot(
             maze=maze,
             config=QLearningConfig(),
-            reward_system=reward_system,
+            rewardSystem=rewardSystem,
             statistics=stats,
-            profile_name="viz_test",
+            profileName="viz_test",
             repository=cast(Any, repo),
         )
-        before = repo.persist_calls
-        finished = bot.step_visualization(max_steps=3)
+        before = repo.persistCalls
+        finished = bot.stepVisualization(maxSteps=3)
         self.assertIsInstance(finished, bool)
-        self.assertEqual(repo.persist_calls, before)
+        self.assertEqual(repo.persistCalls, before)
 
 
 if __name__ == "__main__":

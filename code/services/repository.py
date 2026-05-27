@@ -21,59 +21,59 @@ class ArtifactsRepository:
     All writes are atomic.
     """
 
-    def __init__(self, base_dir: str = "profiles"):
-        self.base_dir = base_dir
+    def __init__(self, baseDir: str = "profiles"):
+        self.baseDir = baseDir
 
     # ---------- Helpers ----------
-    def _profile_dir(self, profile: str) -> str:
-        return os.path.join(self.base_dir, profile)
+    def _profileDir(self, profile: str) -> str:
+        return os.path.join(self.baseDir, profile)
 
-    def _ensure_dir(self, path: str) -> None:
+    def _ensureDir(self, path: str) -> None:
         os.makedirs(path, exist_ok=True)
 
     # ---------- Generic paths ----------
-    def _profile_path(self, profile: str) -> str:
-        return os.path.join(self._profile_dir(profile), "profile.pkl")
+    def _profilePath(self, profile: str) -> str:
+        return os.path.join(self._profileDir(profile), "profile.pkl")
 
-    def rewards_path(self, profile: str) -> str:
-        return os.path.join(self._profile_dir(profile), "SimulationRewards.txt")
+    def rewardsPath(self, profile: str) -> str:
+        return os.path.join(self._profileDir(profile), "SimulationRewards.txt")
 
-    def mazes_json_path(self, profile: str) -> str:
-        return os.path.join(self._profile_dir(profile), "mazes.json")
+    def mazesJsonPath(self, profile: str) -> str:
+        return os.path.join(self._profileDir(profile), "mazes.json")
 
     # ---------- Q-table ----------
-    def q_table_path(self, profile: str) -> str:
-        return os.path.join(self._profile_dir(profile), "q_table.pkl")
+    def qTablePath(self, profile: str) -> str:
+        return os.path.join(self._profileDir(profile), "q_table.pkl")
 
-    def q_table_checksum_path(self, profile: str) -> str:
-        return os.path.join(self._profile_dir(profile), "q_table.checksum")
+    def qTableChecksumPath(self, profile: str) -> str:
+        return os.path.join(self._profileDir(profile), "q_table.checksum")
 
     # ---------- Future model artifacts (extension seam) ----------
-    def model_artifacts_dir(self, profile: str) -> str:
-        return os.path.join(self._profile_dir(profile), "artifacts")
+    def modelArtifactsDir(self, profile: str) -> str:
+        return os.path.join(self._profileDir(profile), "artifacts")
 
-    def _validate_artifact_name(self, artifact_name: str) -> str:
+    def _validateArtifactName(self, artifactName: str) -> str:
         # Fail fast on path traversal or empty names.
-        cleaned = artifact_name.strip()
+        cleaned = artifactName.strip()
         if not cleaned or os.path.basename(cleaned) != cleaned:
-            raise ValueError(f"Invalid artifact name: {artifact_name}")
+            raise ValueError(f"Invalid artifact name: {artifactName}")
         return cleaned
 
-    def model_artifact_path(self, profile: str, artifact_name: str) -> str:
-        name = self._validate_artifact_name(artifact_name)
-        return os.path.join(self.model_artifacts_dir(profile), name)
+    def modelArtifactPath(self, profile: str, artifactName: str) -> str:
+        name = self._validateArtifactName(artifactName)
+        return os.path.join(self.modelArtifactsDir(profile), name)
 
-    def save_model_artifact_bytes(self, profile: str, artifact_name: str, data: bytes) -> None:
-        d = self.model_artifacts_dir(profile)
-        self._ensure_dir(d)
-        path = self.model_artifact_path(profile, artifact_name)
+    def saveModelArtifactBytes(self, profile: str, artifactName: str, data: bytes) -> None:
+        d = self.modelArtifactsDir(profile)
+        self._ensureDir(d)
+        path = self.modelArtifactPath(profile, artifactName)
         with tempfile.NamedTemporaryFile(delete=False, dir=d, mode='wb') as tmp:
             tmp.write(data)
             temp = tmp.name
         os.replace(temp, path)
 
-    def load_model_artifact_bytes(self, profile: str, artifact_name: str) -> bytes | None:
-        path = self.model_artifact_path(profile, artifact_name)
+    def loadModelArtifactBytes(self, profile: str, artifactName: str) -> bytes | None:
+        path = self.modelArtifactPath(profile, artifactName)
         if not os.path.exists(path) or os.path.getsize(path) == 0:
             return None
         try:
@@ -82,37 +82,37 @@ class ArtifactsRepository:
         except Exception:
             return None
 
-    def _file_checksum(self, file_path: str) -> str:
+    def _fileChecksum(self, filePath: str) -> str:
         sha256 = hashlib.sha256()
-        with open(file_path, 'rb') as f:
+        with open(filePath, 'rb') as f:
             for block in iter(lambda: f.read(4096), b""):
                 sha256.update(block)
         return sha256.hexdigest()
 
-    def save_q_table(self, profile: str, q_table: dict[Any, Any]) -> None:
-        d = self._profile_dir(profile)
-        self._ensure_dir(d)
-        path = self.q_table_path(profile)
+    def saveQTable(self, profile: str, qTable: dict[Any, Any]) -> None:
+        d = self._profileDir(profile)
+        self._ensureDir(d)
+        path = self.qTablePath(profile)
         # Atomic write
         with tempfile.NamedTemporaryFile(delete=False, dir=d) as tmp:
-            pickle.dump(q_table, tmp)
-            temp_name = tmp.name
-        os.replace(temp_name, path)
+            pickle.dump(qTable, tmp)
+            tempName = tmp.name
+        os.replace(tempName, path)
         # Write checksum
-        chksum = self._file_checksum(path)
-        with open(self.q_table_checksum_path(profile), 'w') as f:
+        chksum = self._fileChecksum(path)
+        with open(self.qTableChecksumPath(profile), 'w') as f:
             f.write(chksum)
 
-    def load_q_table(self, profile: str) -> dict[Any, Any]:
-        path = self.q_table_path(profile)
+    def loadQTable(self, profile: str) -> dict[Any, Any]:
+        path = self.qTablePath(profile)
         if not os.path.exists(path) or os.path.getsize(path) == 0:
             return {}
-        chk_path = self.q_table_checksum_path(profile)
-        if os.path.exists(chk_path):
+        chkPath = self.qTableChecksumPath(profile)
+        if os.path.exists(chkPath):
             try:
-                with open(chk_path, 'r') as f:
+                with open(chkPath, 'r') as f:
                     saved = f.read()
-                now = self._file_checksum(path)
+                now = self._fileChecksum(path)
                 if saved != now:
                     # Corrupt or partial file; ignore
                     return {}
@@ -125,15 +125,15 @@ class ArtifactsRepository:
             return {}
 
     # ---------- Rewards log ----------
-    def append_reward(self, profile: str, reward: float) -> None:
-        d = self._profile_dir(profile)
-        self._ensure_dir(d)
+    def appendReward(self, profile: str, reward: float) -> None:
+        d = self._profileDir(profile)
+        self._ensureDir(d)
         with open(os.path.join(d, "SimulationRewards.txt"), 'a') as f:
             f.write(f"{reward}\n")
 
     # ---------- Profile dictionary helpers ----------
-    def _read_profile_dict(self, profile: str) -> ProfileDict:
-        path = self._profile_path(profile)
+    def _readProfileDict(self, profile: str) -> ProfileDict:
+        path = self._profilePath(profile)
         if not os.path.exists(path) or os.path.getsize(path) == 0:
             return {}
         try:
@@ -145,45 +145,45 @@ class ArtifactsRepository:
         except Exception:
             return {}
 
-    def _write_profile_dict(self, profile: str, data: ProfileDict) -> None:
-        d = self._profile_dir(profile)
-        self._ensure_dir(d)
-        path = self._profile_path(profile)
+    def _writeProfileDict(self, profile: str, data: ProfileDict) -> None:
+        d = self._profileDir(profile)
+        self._ensureDir(d)
+        path = self._profilePath(profile)
         with tempfile.NamedTemporaryFile(delete=False, dir=d, mode='wb') as tmp:
             pickle.dump(data, tmp)
             temp = tmp.name
         os.replace(temp, path)
 
-    def read_profile_stats(self, profile: str) -> ProfileDict:
-        return self._read_profile_dict(profile)
+    def readProfileStats(self, profile: str) -> ProfileDict:
+        return self._readProfileDict(profile)
 
-    def update_profile_counters(
+    def updateProfileCounters(
         self,
         profile: str,
         *,
-        total_steps: int | None = None,
-        non_repeating_steps_taken: int | None = None,
-        times_revisited_squares: int | None = None,
-        times_hit_wall_increment: int | None = None,
+        totalSteps: int | None = None,
+        nonRepeatingStepsTaken: int | None = None,
+        timesRevisitedSquares: int | None = None,
+        timesHitWallIncrement: int | None = None,
     ) -> None:
-        data = self._read_profile_dict(profile)
-        if total_steps is not None:
-            data['total_steps'] = int(data.get('total_steps', 0)) + int(total_steps)
-        if non_repeating_steps_taken is not None:
-            data['non_repeating_steps_taken'] = int(data.get('non_repeating_steps_taken', 0)) + int(non_repeating_steps_taken)
-        if times_revisited_squares is not None:
-            data['times_revisited_squares'] = int(data.get('times_revisited_squares', 0)) + int(times_revisited_squares)
-        if times_hit_wall_increment is not None:
-            data['times_hit_wall'] = int(data.get('times_hit_wall', 0)) + int(times_hit_wall_increment)
-        self._write_profile_dict(profile, data)
+        data = self._readProfileDict(profile)
+        if totalSteps is not None:
+            data['total_steps'] = int(data.get('total_steps', 0)) + int(totalSteps)
+        if nonRepeatingStepsTaken is not None:
+            data['non_repeating_steps_taken'] = int(data.get('non_repeating_steps_taken', 0)) + int(nonRepeatingStepsTaken)
+        if timesRevisitedSquares is not None:
+            data['times_revisited_squares'] = int(data.get('times_revisited_squares', 0)) + int(timesRevisitedSquares)
+        if timesHitWallIncrement is not None:
+            data['times_hit_wall'] = int(data.get('times_hit_wall', 0)) + int(timesHitWallIncrement)
+        self._writeProfileDict(profile, data)
 
-    def increment_times_hit_wall(self, profile: str, n: int = 1) -> None:
-        self.update_profile_counters(profile, times_hit_wall_increment=int(n))
+    def incrementTimesHitWall(self, profile: str, n: int = 1) -> None:
+        self.updateProfileCounters(profile, timesHitWallIncrement=int(n))
 
     # ---------- Mazes.json helpers ----------
-    def load_maze_data(self, profile: str) -> ProfileDict:
+    def loadMazeData(self, profile: str) -> ProfileDict:
         import json, ast
-        path = self.mazes_json_path(profile)
+        path = self.mazesJsonPath(profile)
         if not os.path.exists(path) or os.path.getsize(path) == 0:
             return {
                 "latest": {},
@@ -209,13 +209,13 @@ class ArtifactsRepository:
             container = data.get(key)
             if not isinstance(container, dict):
                 continue
-            container_dict = cast(dict[str, Any], container)
-            hm = container_dict.get('heatmap_data')
+            containerDict = cast(dict[str, Any], container)
+            hm = containerDict.get('heatmap_data')
             if not isinstance(hm, dict):
                 continue
-            hm_dict = cast(dict[Any, Any], hm)
+            hmDict = cast(dict[Any, Any], hm)
             converted: HeatmapData = {}
-            for k, v in hm_dict.items():
+            for k, v in hmDict.items():
                 tup: tuple[int, int] | None = None
                 try:
                     obj = ast.literal_eval(str(k))
@@ -235,23 +235,23 @@ class ArtifactsRepository:
                     except Exception:
                         continue
                 converted[tup] = int(v)
-            container_dict['heatmap_data'] = converted
-            data[key] = container_dict
+            containerDict['heatmap_data'] = converted
+            data[key] = containerDict
         return data
 
-    def save_maze_episode(self, profile: str, maze: Any, heatmap_data: HeatmapData, reward: float) -> None:
+    def saveMazeEpisode(self, profile: str, maze: Any, heatmapData: HeatmapData, reward: float) -> None:
         import json
-        d = self._profile_dir(profile)
-        self._ensure_dir(d)
-        path = self.mazes_json_path(profile)
-        data = self.load_maze_data(profile)
+        d = self._profileDir(profile)
+        self._ensureDir(d)
+        path = self.mazesJsonPath(profile)
+        data = self.loadMazeData(profile)
         # Store heatmap with string keys for JSON
-        heatmap_str = {str(k): int(v) for k, v in heatmap_data.items()}
+        heatmapStr = {str(k): int(v) for k, v in heatmapData.items()}
         latest = {
             "maze": getattr(maze, 'grid', None),
             "start": getattr(maze, 'start', None),
             "end": getattr(maze, 'end', None),
-            "heatmap_data": heatmap_str,
+            "heatmap_data": heatmapStr,
             "reward": float(reward),
         }
         data['latest'] = latest
@@ -259,28 +259,28 @@ class ArtifactsRepository:
         if float(reward) > float(data.get('highest', {}).get('reward', float('-inf'))):
             data['highest'] = dict(latest)
             highest = cast(dict[str, Any], data['highest'])
-            highest['heatmap_data'] = dict(heatmap_str)
+            highest['heatmap_data'] = dict(heatmapStr)
         if float(reward) < float(data.get('lowest', {}).get('reward', float('inf'))):
             data['lowest'] = dict(latest)
             lowest = cast(dict[str, Any], data['lowest'])
-            lowest['heatmap_data'] = dict(heatmap_str)
+            lowest['heatmap_data'] = dict(heatmapStr)
         # Ensure existing snapshots are JSON-serializable (string keys)
         for key in ('latest', 'highest', 'lowest'):
-            snap_raw = data.get(key)
+            snapRaw = data.get(key)
             snap: dict[str, Any]
-            if isinstance(snap_raw, dict):
-                snap = cast(dict[str, Any], snap_raw)
+            if isinstance(snapRaw, dict):
+                snap = cast(dict[str, Any], snapRaw)
             else:
                 snap = {}
             hm = snap.get('heatmap_data')
             if isinstance(hm, dict):
-                hm_dict = cast(dict[Any, Any], hm)
+                hmDict = cast(dict[Any, Any], hm)
                 # Convert any tuple keys back to strings
-                if any(isinstance(k, tuple) for k in hm_dict.keys()):
-                    snap['heatmap_data'] = {str(k): int(v) for k, v in hm_dict.items()}
+                if any(isinstance(k, tuple) for k in hmDict.keys()):
+                    snap['heatmap_data'] = {str(k): int(v) for k, v in hmDict.items()}
                 else:
                     # normalize values to int for consistency
-                    snap['heatmap_data'] = {str(k): int(v) for k, v in hm_dict.items()}
+                    snap['heatmap_data'] = {str(k): int(v) for k, v in hmDict.items()}
             data[key] = snap
         # Atomic write
         with tempfile.NamedTemporaryFile(delete=False, dir=d, mode='w') as tmp:
@@ -288,12 +288,12 @@ class ArtifactsRepository:
             temp = tmp.name
         os.replace(temp, path)
 
-    def ensure_maze_file(self, profile: str) -> None:
+    def ensureMazeFile(self, profile: str) -> None:
         """Create mazes.json with default structure if missing."""
         import json
-        d = self._profile_dir(profile)
-        self._ensure_dir(d)
-        path = self.mazes_json_path(profile)
+        d = self._profileDir(profile)
+        self._ensureDir(d)
+        path = self.mazesJsonPath(profile)
         if os.path.exists(path) and os.path.getsize(path) > 0:
             return
         data = {
@@ -306,14 +306,14 @@ class ArtifactsRepository:
             temp = tmp.name
         os.replace(temp, path)
 
-    def update_steps_from_heatmap(self, profile: str, heatmap_data: HeatmapData) -> None:
+    def updateStepsFromHeatmap(self, profile: str, heatmapData: HeatmapData) -> None:
         """Update total_steps, times_revisited_squares, non_repeating_steps_taken from heatmap."""
-        total = int(sum(int(v) for v in (heatmap_data or {}).values()))
-        unique = int(len(heatmap_data or {}))
+        total = int(sum(int(v) for v in (heatmapData or {}).values()))
+        unique = int(len(heatmapData or {}))
         repeated = int(max(0, total - unique))
-        self.update_profile_counters(
+        self.updateProfileCounters(
             profile,
-            total_steps=total,
-            non_repeating_steps_taken=unique,
-            times_revisited_squares=repeated,
+            totalSteps=total,
+            nonRepeatingStepsTaken=unique,
+            timesRevisitedSquares=repeated,
         )

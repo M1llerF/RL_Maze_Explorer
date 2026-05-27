@@ -7,36 +7,36 @@ class BotStatistics:
     Persistence and aggregation are handled by services.repository.ArtifactsRepository.
     """
     def __init__(self) -> None:
-        self.total_steps: int = 0
-        self.times_hit_wall: int = 0
-        self.times_revisited_squares: int = 0
-        self.non_repeating_steps_taken: int = 0
-        self.visited_positions: Dict[Tuple[int, int], int] = {}
-        self.last_visited_positions: list[Tuple[int, int]] = []
+        self.totalSteps: int = 0
+        self.timesHitWall: int = 0
+        self.timesRevisitedSquares: int = 0
+        self.nonRepeatingStepsTaken: int = 0
+        self.visitedPositions: Dict[Tuple[int, int], int] = {}
+        self.lastVisitedPositions: list[Tuple[int, int]] = []
 
     def reset(self) -> None:
-        self.total_steps = 0
-        self.times_hit_wall = 0
-        self.times_revisited_squares = 0
-        self.non_repeating_steps_taken = 0
-        self.visited_positions.clear()
-        self.last_visited_positions.clear()
+        self.totalSteps = 0
+        self.timesHitWall = 0
+        self.timesRevisitedSquares = 0
+        self.nonRepeatingStepsTaken = 0
+        self.visitedPositions.clear()
+        self.lastVisitedPositions.clear()
 
-    def update_visited_positions(self, position: Tuple[int, int]) -> None:
+    def updateVisitedPositions(self, position: Tuple[int, int]) -> None:
         """Update the count of times a position has been visited."""
-        self.visited_positions[position] = self.visited_positions.get(position, 0) + 1
+        self.visitedPositions[position] = self.visitedPositions.get(position, 0) + 1
 
-    def get_visited_positions(self) -> Dict[Tuple[int, int], int]:
+    def getVisitedPositions(self) -> Dict[Tuple[int, int], int]:
         """Retrieve the dictionary of visited positions."""
-        return self.visited_positions
+        return self.visitedPositions
 
-    def update_last_visited(self, position: Tuple[int, int]) -> None:
+    def updateLastVisited(self, position: Tuple[int, int]) -> None:
         """Update the list of the last visited positions."""
-        if len(self.last_visited_positions) >= 5:
-            self.last_visited_positions.pop(0)
-        if position not in self.last_visited_positions:
-            self.last_visited_positions.append(position)
+        if len(self.lastVisitedPositions) >= 5:
+            self.lastVisitedPositions.pop(0)
+        if position not in self.lastVisitedPositions:
+            self.lastVisitedPositions.append(position)
 
-    def get_last_visited(self) -> list[Tuple[int, int]]:
+    def getLastVisited(self) -> list[Tuple[int, int]]:
         """Retrieve the list of the last visited positions."""
-        return self.last_visited_positions
+        return self.lastVisitedPositions

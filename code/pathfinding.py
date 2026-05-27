@@ -5,46 +5,46 @@ from collections import deque
 
 class Pathfinding:
     @staticmethod
-    def a_star_search(maze: Any, start: tuple[int, int], goal: tuple[int, int]) -> list[tuple[int, int]]:
+    def aStarSearch(maze: Any, start: tuple[int, int], goal: tuple[int, int]) -> list[tuple[int, int]]:
         def heuristic(a: tuple[int, int], b: tuple[int, int]) -> float:
             return float(np.linalg.norm(np.array(a) - np.array(b)))
         
-        def get_neighbors(pos: tuple[int, int]) -> list[tuple[int, int]]:
+        def getNeighbors(pos: tuple[int, int]) -> list[tuple[int, int]]:
             neighbors: list[tuple[int, int]] = []
             directions = [(-1, 0), (1, 0), (0, -1), (0, 1)]
             for dx, dy in directions:
                 x2, y2 = pos[0] + dx, pos[1] + dy
-                if 0 <= x2 < maze.height and 0 <= y2 < maze.width and maze.is_valid_position(None, x2, y2):
+                if 0 <= x2 < maze.height and 0 <= y2 < maze.width and maze.isValidPosition(None, x2, y2):
                     neighbors.append((x2, y2))
             return neighbors
 
-        open_list: list[tuple[float, tuple[int, int]]] = []
-        heapq.heappush(open_list, (0, start))
-        came_from: dict[tuple[int, int], tuple[int, int] | None] = {start: None}
-        cost_so_far: dict[tuple[int, int], int] = {start: 0}
+        openList: list[tuple[float, tuple[int, int]]] = []
+        heapq.heappush(openList, (0, start))
+        cameFrom: dict[tuple[int, int], tuple[int, int] | None] = {start: None}
+        costSoFar: dict[tuple[int, int], int] = {start: 0}
         
-        while open_list:
-            _, current = heapq.heappop(open_list)
+        while openList:
+            _, current = heapq.heappop(openList)
             
             if current == goal:
                 break
             
-            for neighbor in get_neighbors(current):
-                new_cost = cost_so_far[current] + 1
-                if neighbor not in cost_so_far or new_cost < cost_so_far[neighbor]:
-                    cost_so_far[neighbor] = new_cost
-                    priority = new_cost + heuristic(goal, neighbor)
-                    heapq.heappush(open_list, (priority, neighbor))
-                    came_from[neighbor] = current
+            for neighbor in getNeighbors(current):
+                newCost = costSoFar[current] + 1
+                if neighbor not in costSoFar or newCost < costSoFar[neighbor]:
+                    costSoFar[neighbor] = newCost
+                    priority = newCost + heuristic(goal, neighbor)
+                    heapq.heappush(openList, (priority, neighbor))
+                    cameFrom[neighbor] = current
 
         # Reconstruct path if reachable; otherwise return empty list
-        if goal not in came_from:
+        if goal not in cameFrom:
             return []
         path: list[tuple[int, int]] = []
         current = goal
         while current is not None and current != start:
             path.append(current)
-            current = came_from.get(current)
+            current = cameFrom.get(current)
         if current == start:
             path.append(start)
             path.reverse()
@@ -53,7 +53,7 @@ class Pathfinding:
         return []
 
     @staticmethod
-    def bfs_shortest_path_grid(grid: list[list[int]], start: tuple[int, int], goal: tuple[int, int]) -> list[tuple[int, int]]:
+    def bfsShortestPathGrid(grid: list[list[int]], start: tuple[int, int], goal: tuple[int, int]) -> list[tuple[int, int]]:
         """
         Compute shortest path on a 4-connected grid using BFS.
         grid: 2D list where 0=open, 1=wall. start/goal are (y,x).

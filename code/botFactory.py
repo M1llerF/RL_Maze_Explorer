@@ -8,7 +8,7 @@ from services.repository import ArtifactsRepository
 
 
 class BotProtocol(Protocol):
-    def initialize_specific_data(self, data: dict[str, Any]) -> None: ...
+    def initializeSpecificData(self, data: dict[str, Any]) -> None: ...
 
 
 class BotFactory:
@@ -19,34 +19,34 @@ class BotFactory:
         :param maze: The maze instance that the bots will navigate.
         """
         self.maze = maze
-        self.bot_registry: dict[str, Any] = {}
+        self.botRegistry: dict[str, Any] = {}
         self.repository = repository or ArtifactsRepository()
 
-    def register_bot(self, bot_type: str, bot_class: Any) -> None:
+    def registerBot(self, botType: str, botClass: Any) -> None:
         """
         Register a new bot type with its corresponding class.
 
         :param bot_type: A string representing the type of the bot.
         :param bot_class: The class of the bot to be registered.
         """
-        self.bot_registry[bot_type] = bot_class
+        self.botRegistry[botType] = botClass
 
-    def is_registered(self, bot_type: str) -> bool:
+    def isRegistered(self, botType: str) -> bool:
         """Return whether the given bot type is registered."""
-        return bot_type in self.bot_registry
+        return botType in self.botRegistry
 
-    def list_registered_bot_types(self) -> list[str]:
+    def listRegisteredBotTypes(self) -> list[str]:
         """Return sorted registered bot type names for diagnostics/UI callers."""
-        return sorted(self.bot_registry.keys())
+        return sorted(self.botRegistry.keys())
 
-    def create_bot(
+    def createBot(
         self,
-        bot_type: str,
-        profile_name: str,
+        botType: str,
+        profileName: str,
         config: Any,
-        reward_config: Any,
+        rewardConfig: Any,
         statistics: Any,
-        bot_specific_data: dict[str, Any],
+        botSpecificData: dict[str, Any],
     ) -> Any:
         """
         Create a instance of the specified bot type.
@@ -62,28 +62,30 @@ class BotFactory:
         
         :raises ValueError: If the bot type is not registered.
         """
-        if not self.is_registered(bot_type):
-            known = self.list_registered_bot_types()
-            known_msg = ", ".join(known) if known else "<none>"
-            raise ValueError(f"Unknown bot type: {bot_type}. Registered bot types: {known_msg}")
+        if not self.isRegistered(botType):
+            known = self.listRegisteredBotTypes()
+            knownMsg = ", ".join(known) if known else "<none>"
+            raise ValueError(f"Unknown bot type: {botType}. Registered bot types: {knownMsg}")
 
-        bot_class = self.bot_registry[bot_type]
+        botClass = self.botRegistry[botType]
         # Provide minimal sensors interface decoupled from BotTools
-        reward_system = RewardSystem(self.maze, reward_config, sensors=MazeSensors(self.maze))
+        rewardSystem = RewardSystem(self.maze, rewardConfig, sensors=MazeSensors(self.maze))
         # Constructor argument filtering keeps multi-bot extension straightforward
         # without per-bot branching in the factory.
-        constructor_args: dict[str, Any] = {
+        constructorArgs: dict[str, Any] = {
             "maze": self.maze,
             "config": config,
-            "reward_system": reward_system,
+            "rewardSystem": rewardSystem,
+            "reward_system": rewardSystem,
             "statistics": statistics,
-            "profile_name": profile_name,
+            "profileName": profileName,
+            "profile_name": profileName,
             "repository": self.repository,
         }
-        signature = inspect.signature(bot_class)
-        accepts_kwargs = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in signature.parameters.values())
-        if accepts_kwargs:
-            ctor_kwargs = constructor_args
+        signature = inspect.signature(botClass)
+        acceptsKwargs = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in signature.parameters.values())
+        if acceptsKwargs:
+            ctorKwargs = constructorArgs
         else:
             accepted = {
                 name
@@ -91,10 +93,12 @@ class BotFactory:
                 if name != "self"
                 and p.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
             }
-            ctor_kwargs = {k: v for k, v in constructor_args.items() if k in accepted}
-        bot_instance = bot_class(**ctor_kwargs)
+            ctorKwargs = {k: v for k, v in constructorArgs.items() if k in accepted}
+        botInstance = botClass(**ctorKwargs)
         
-        if hasattr(bot_instance, 'initialize_specific_data'):
-            bot_instance.initialize_specific_data(bot_specific_data)
+        if hasattr(botInstance, 'initializeSpecificData'):
+            botInstance.initializeSpecificData(botSpecificData)
+        elif hasattr(botInstance, 'initialize_specific_data'):
+            botInstance.initialize_specific_data(botSpecificData)
 
-        return bot_instance
+        return botInstance

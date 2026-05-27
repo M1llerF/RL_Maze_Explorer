@@ -30,22 +30,22 @@ class BaseBot:
         self.statistics = statistics
         self.config = config
         # Cooperative stop flag to abort long episodes promptly
-        self._stop_requested = False
+        self._stopRequested = False
     
     def reset(self) -> None:
         """Reset the bot's state and statistics. Should be implemented by subclasses."""
         raise NotImplementedError("This method should be implemented by subclasses.")
 
-    def calculate_state(self) -> Any:
+    def calculateState(self) -> Any:
         """Calculate the current state of the bot. Should be implemented by subclasses."""
         raise NotImplementedError("This method should be implemented by subclasses.")
 
-    def run_episode(self) -> None:
+    def runEpisode(self) -> None:
         """Run a single episode of the bot's operation. Should be implemented by subclasses."""
         raise NotImplementedError("This method should be implemented by subclasses.")
 
     # Episode lifecycle hooks ------------------------------------------------
-    def on_episode_start(self, mode: str) -> None:
+    def onEpisodeStart(self, mode: str) -> None:
         """
         Hook called exactly once at episode start.
 
@@ -53,7 +53,7 @@ class BaseBot:
         """
         raise NotImplementedError("This method should be implemented by subclasses.")
 
-    def on_episode_step(self, mode: str, step_index: int) -> None:
+    def onEpisodeStep(self, mode: str, stepIndex: int) -> None:
         """
         Hook called on each episode loop iteration.
 
@@ -62,7 +62,7 @@ class BaseBot:
         """
         raise NotImplementedError("This method should be implemented by subclasses.")
 
-    def on_episode_end(self, mode: str, outcome: str) -> None:
+    def onEpisodeEnd(self, mode: str, outcome: str) -> None:
         """
         Hook called exactly once when an episode exits.
 
@@ -72,8 +72,8 @@ class BaseBot:
         raise NotImplementedError("This method should be implemented by subclasses.")
 
     # Cooperative stop handling
-    def request_stop(self) -> None:
-        self._stop_requested = True
+    def requestStop(self) -> None:
+        self._stopRequested = True
 
-    def clear_stop(self) -> None:
-        self._stop_requested = False
+    def clearStop(self) -> None:
+        self._stopRequested = False

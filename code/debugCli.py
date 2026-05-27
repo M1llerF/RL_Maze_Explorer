@@ -5,15 +5,15 @@ from typing import Any, Dict, List, cast
 from services.repository import ArtifactsRepository
 
 from gameEnvironment import GameEnvironment
-from botConfigs import QLearningConfig, bot_configs
+from botConfigs import QLearningConfig, botConfigs
 from rewardSystem import RewardConfig
 
 
-def _read_profile_stats(profile_name: str) -> Dict[str, Any]:
+def _readProfileStats(profileName: str) -> Dict[str, Any]:
     """Read aggregated profile stats via repository, returning defaults when absent."""
     try:
         repo = ArtifactsRepository("profiles")
-        return repo.read_profile_stats(profile_name) or {}
+        return repo.readProfileStats(profileName) or {}
     except Exception:
         return {}
 
@@ -22,7 +22,7 @@ def _delta(after: Dict[str, Any], before: Dict[str, Any], key: str) -> int:
     return int(after.get(key, 0) - before.get(key, 0))
 
 
-def run_profile_episodes(profile_name: str, episodes: int) -> Dict[str, Any]:
+def runProfileEpisodes(profileName: str, episodes: int) -> Dict[str, Any]:
     """
     Run a profile for N episodes without GUI and collect debug metrics.
 
@@ -31,97 +31,97 @@ def run_profile_episodes(profile_name: str, episodes: int) -> Dict[str, Any]:
     env: Any = GameEnvironment()
 
     # Load profile and create/apply bot
-    profile = env.profile_manager.load_profile(profile_name)
-    bot_index = int(env.apply_profile(profile))
-    bot: Any = env.bots[bot_index]
+    profile = env.profileManager.loadProfile(profileName)
+    botIndex = int(env.applyProfile(profile))
+    bot: Any = env.bots[botIndex]
 
     # Static reference values
-    optimal_path: list[tuple[int, int]] = cast(
+    optimalPath: list[tuple[int, int]] = cast(
         list[tuple[int, int]],
-        bot.tools.get_optimal_path_info(bot.maze.start, bot.maze.end, output="path"),
+        bot.tools.getOptimalPathInfo(bot.maze.start, bot.maze.end, output="path"),
     )
-    optimal_len = len(optimal_path)
+    optimalLen = len(optimalPath)
 
-    per_episode: List[Dict[str, Any]] = []
+    perEpisode: List[Dict[str, Any]] = []
 
     for ep in range(episodes):
-        before = _read_profile_stats(profile_name)
+        before = _readProfileStats(profileName)
 
-        bot.run_episode()
+        bot.runEpisode()
 
-        after = _read_profile_stats(profile_name)
+        after = _readProfileStats(profileName)
 
         success = bot.position == bot.maze.end
 
-        steps_total = _delta(after, before, "total_steps")
-        steps_unique = _delta(after, before, "non_repeating_steps_taken")
-        steps_revisited = _delta(after, before, "times_revisited_squares")
-        walls_hit = _delta(after, before, "times_hit_wall")
+        stepsTotal = _delta(after, before, "total_steps")
+        stepsUnique = _delta(after, before, "non_repeating_steps_taken")
+        stepsRevisited = _delta(after, before, "times_revisited_squares")
+        wallsHit = _delta(after, before, "times_hit_wall")
 
-        per_episode.append({
+        perEpisode.append({
             "episode": ep + 1,
-            "reward": float(bot.total_reward),
+            "reward": float(bot.totalReward),
             "success": bool(success),
-            "steps_total": int(steps_total),
-            "steps_unique": int(steps_unique),
-            "steps_revisited": int(steps_revisited),
-            "walls_hit": int(walls_hit),
-            "q_table_states": int(len(bot.q_learning.q_table)),
-            "unique_vs_optimal": float(steps_unique / optimal_len) if optimal_len > 0 else 0.0,
+            "steps_total": int(stepsTotal),
+            "steps_unique": int(stepsUnique),
+            "steps_revisited": int(stepsRevisited),
+            "walls_hit": int(wallsHit),
+            "q_table_states": int(len(bot.qLearning.qTable)),
+            "unique_vs_optimal": float(stepsUnique / optimalLen) if optimalLen > 0 else 0.0,
         })
 
         # Reset environment for next episode
-        env.reset_environment(bot_index)
+        env.resetEnvironment(botIndex)
 
     # Summaries
-    rewards = [e["reward"] for e in per_episode]
-    successes = [1 if e["success"] else 0 for e in per_episode]
-    q_sizes = [e["q_table_states"] for e in per_episode]
-    walls = [e["walls_hit"] for e in per_episode]
+    rewards = [e["reward"] for e in perEpisode]
+    successes = [1 if e["success"] else 0 for e in perEpisode]
+    qSizes = [e["q_table_states"] for e in perEpisode]
+    walls = [e["walls_hit"] for e in perEpisode]
 
     summary = {
         "episodes": episodes,
-        "profile": profile_name,
+        "profile": profileName,
         "success_rate": sum(successes) / episodes if episodes else 0.0,
         "avg_reward": sum(rewards) / episodes if episodes else 0.0,
         "avg_walls_hit": sum(walls) / episodes if episodes else 0.0,
-        "qtable_growth": q_sizes[-1] - q_sizes[0] if episodes > 1 else 0,
-        "optimal_path_len": optimal_len,
+        "qtable_growth": qSizes[-1] - qSizes[0] if episodes > 1 else 0,
+        "optimal_path_len": optimalLen,
     }
-    success_rate = float(summary["success_rate"])
-    avg_reward = float(summary["avg_reward"])
-    avg_walls_hit = float(summary["avg_walls_hit"])
-    qtable_growth = int(summary["qtable_growth"])
+    successRate = float(summary["success_rate"])
+    avgReward = float(summary["avg_reward"])
+    avgWallsHit = float(summary["avg_walls_hit"])
+    qtableGrowth = int(summary["qtable_growth"])
 
     # Simple heuristics for failure hints
     hints: List[str] = []
-    if success_rate < 0.25 and avg_reward < 0:
+    if successRate < 0.25 and avgReward < 0:
         hints.append("Low success and negative rewards: agent likely not reaching goal; consider lowering exploration decay or adjusting rewards.")
-    if avg_walls_hit > 5:
+    if avgWallsHit > 5:
         hints.append("High wall collisions: increase wall penalty or improve state features.")
-    if qtable_growth <= 0 and episodes > 5:
+    if qtableGrowth <= 0 and episodes > 5:
         hints.append("Q-table not growing: exploration may be too low or episodes too short.")
 
-    return {"summary": summary, "per_episode": per_episode, "hints": hints}
+    return {"summary": summary, "per_episode": perEpisode, "hints": hints}
 
 
-def create_profile(profile_name: str, bot_type: str = "QLearningBot", lr: float = 0.1, gamma: float = 0.9,
-                   use_position_in_state: bool = True, potential: bool = False, progress_scale: float = 5.0) -> None:
+def createProfile(profileName: str, botType: str = "QLearningBot", lr: float = 0.1, gamma: float = 0.9,
+                   usePositionInState: bool = True, potential: bool = False, progressScale: float = 5.0) -> None:
     """Create a new profile directory with default config and reward settings."""
     env: Any = GameEnvironment()
 
-    if bot_type != "QLearningBot":
+    if botType != "QLearningBot":
         raise ValueError("Currently only QLearningBot is supported by this CLI.")
 
     # Build config
-    config = QLearningConfig(learning_rate=lr, discount_factor=gamma, use_position_in_state=use_position_in_state)
+    config = QLearningConfig(learningRate=lr, discountFactor=gamma, usePositionInState=usePositionInState)
 
     # Build reward config from bot_configs defaults
-    rewards = bot_configs.get(bot_type, {}).get("rewards", {})
-    reward_config = RewardConfig(reward_modifiers=rewards, use_potential_shaping=potential, progress_scale=progress_scale)
+    rewards = botConfigs.get(botType, {}).get("rewards", {})
+    rewardConfig = RewardConfig(rewardModifiers=rewards, usePotentialShaping=potential, progressScale=progressScale)
 
-    env.setup_new_profile(profile_name, bot_type, config, reward_config)
-    print(f"Created profile '{profile_name}' for {bot_type} (lr={lr}, gamma={gamma}, pos_state={use_position_in_state}, potential={potential}, progress_scale={progress_scale}).")
+    env.setupNewProfile(profileName, botType, config, rewardConfig)
+    print(f"Created profile '{profileName}' for {botType} (lr={lr}, gamma={gamma}, pos_state={usePositionInState}, potential={potential}, progress_scale={progressScale}).")
 
 
 def main() -> None:
@@ -137,36 +137,36 @@ def main() -> None:
     parser.add_argument("--potential", action="store_true", help="Enable potential-based shaping toward goal")
     parser.add_argument("--progress-scale", type=float, default=5.0, help="Scale for shaping progress toward goal")
     args = parser.parse_args()
-    profile_arg = str(args.profile)
-    episodes_arg = int(args.episodes)
-    create_arg = bool(args.create)
-    save_json_arg = bool(args.save_json)
-    bot_arg = str(args.bot)
-    lr_arg = float(args.lr)
-    gamma_arg = float(args.gamma)
-    no_pos_arg = bool(args.no_pos)
-    potential_arg = bool(args.potential)
-    progress_scale_arg = float(args.progress_scale)
+    profileArg = str(args.profile)
+    episodesArg = int(args.episodes)
+    createArg = bool(args.create)
+    saveJsonArg = bool(args.save_json)
+    botArg = str(args.bot)
+    lrArg = float(args.lr)
+    gammaArg = float(args.gamma)
+    noPosArg = bool(args.no_pos)
+    potentialArg = bool(args.potential)
+    progressScaleArg = float(args.progressScale)
 
-    if create_arg:
-        create_profile(
-            profile_arg,
-            bot_arg,
-            lr_arg,
-            gamma_arg,
-            use_position_in_state=(not no_pos_arg),
-            potential=potential_arg,
-            progress_scale=progress_scale_arg,
+    if createArg:
+        createProfile(
+            profileArg,
+            botArg,
+            lrArg,
+            gammaArg,
+            usePositionInState=(not noPosArg),
+            potential=potentialArg,
+            progressScale=progressScaleArg,
         )
         # If only creating, exit early unless episodes > 0
-        if episodes_arg <= 0:
+        if episodesArg <= 0:
             return
 
-    if episodes_arg <= 0:
+    if episodesArg <= 0:
         print("No episodes requested. Use --episodes N to run training.")
         return
 
-    results = run_profile_episodes(profile_arg, episodes_arg)
+    results = runProfileEpisodes(profileArg, episodesArg)
 
     summary = results["summary"]
     print("Profile:", summary["profile"]) 
@@ -191,13 +191,13 @@ def main() -> None:
         for h in results["hints"]:
             print("-", h)
 
-    if save_json_arg:
-        out_dir = os.path.join("profiles", summary["profile"])
-        os.makedirs(out_dir, exist_ok=True)
-        out_path = os.path.join(out_dir, "debug_results.json")
-        with open(out_path, "w") as f:
+    if saveJsonArg:
+        outDir = os.path.join("profiles", summary["profile"])
+        os.makedirs(outDir, exist_ok=True)
+        outPath = os.path.join(outDir, "debug_results.json")
+        with open(outPath, "w") as f:
             json.dump(results, f, indent=2)
-        print(f"\nSaved: {out_path}")
+        print(f"\nSaved: {outPath}")
 
 
 if __name__ == "__main__":

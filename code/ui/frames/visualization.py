@@ -13,11 +13,11 @@ from visualizationStrategy import QLearningBotVisualizationStrategy
 
 
 class VisualizationWindow(tk.Toplevel):
-    def __init__(self, parent: Any, game_env: Any, profile_name: str, profile_index: int) -> None:
+    def __init__(self, parent: Any, gameEnv: Any, profileName: str, profileIndex: int) -> None:
         super().__init__(parent)
-        self.game_env = game_env
-        self.profile_name = profile_name
-        self.profile_index = profile_index
+        self.gameEnv = gameEnv
+        self.profileName = profileName
+        self.profileIndex = profileIndex
         self.title("Maze Visualization")
         self.geometry("600x600")
 
@@ -31,112 +31,112 @@ class VisualizationWindow(tk.Toplevel):
         controls = tk.Frame(self)
         controls.pack(pady=5)
         tk.Label(controls, text="Steps per frame:").pack(side=tk.LEFT)
-        self.steps_var = tk.IntVar(value=20)
-        self.steps_scale = tk.Scale(controls, from_=1, to=200, orient=tk.HORIZONTAL, variable=self.steps_var, length=200)
-        self.steps_scale.pack(side=tk.LEFT, padx=5)
+        self.stepsVar = tk.IntVar(value=20)
+        self.stepsScale = tk.Scale(controls, from_=1, to=200, orient=tk.HORIZONTAL, variable=self.stepsVar, length=200)
+        self.stepsScale.pack(side=tk.LEFT, padx=5)
         self.paused = False
-        self.pause_btn = ttk.Button(controls, text="Pause", command=self.toggle_pause)
-        self.pause_btn.pack(side=tk.LEFT, padx=5)
+        self.pauseBtn = ttk.Button(controls, text="Pause", command=self.togglePause)
+        self.pauseBtn.pack(side=tk.LEFT, padx=5)
 
-        self.after_id = None
+        self.afterId = None
         self.visualize = True
-        self.protocol("WM_DELETE_WINDOW", self.on_close)
+        self.protocol("WM_DELETE_WINDOW", self.onClose)
 
         try:
-            self.game_env.pause_training_for(self.profile_name)
+            self.gameEnv.pauseTrainingFor(self.profileName)
         except Exception:
             pass
 
-        self.update_visualization()
+        self.updateVisualization()
 
-    def update_visualization(self) -> None:
+    def updateVisualization(self) -> None:
         if not self.visualize:
             return
         self.canvas.delete("all")
-        bot = self.game_env.bots[self.profile_index]
+        bot = self.gameEnv.bots[self.profileIndex]
         if not self.paused:
             try:
-                finished = bot.step_visualization(max_steps=self.steps_var.get())
+                finished = bot.stepVisualization(maxSteps=self.stepsVar.get())
                 if finished:
-                    self.game_env.reset_environment(self.profile_index)
+                    self.gameEnv.resetEnvironment(self.profileIndex)
             except AttributeError:
                 pass
-        bot_position = bot.position
-        self.display_with_bot_and_heatmap(bot_position, bot.statistics.get_visited_positions())
-        self.after_id = self.after(100, self.update_visualization)
+        botPosition = bot.position
+        self.displayWithBotAndHeatmap(botPosition, bot.statistics.getVisitedPositions())
+        self.afterId = self.after(100, self.updateVisualization)
 
-    def toggle_pause(self) -> None:
+    def togglePause(self) -> None:
         self.paused = not self.paused
-        self.pause_btn.configure(text="Resume" if self.paused else "Pause")
+        self.pauseBtn.configure(text="Resume" if self.paused else "Pause")
 
-    def display_with_bot(self, bot_position: tuple[int, int]) -> None:
-        maze = self.game_env.maze
-        cell_width = self.canvas.winfo_width() / maze.width
-        cell_height = self.canvas.winfo_height() / maze.height
+    def displayWithBot(self, botPosition: tuple[int, int]) -> None:
+        maze = self.gameEnv.maze
+        cellWidth = self.canvas.winfo_width() / maze.width
+        cellHeight = self.canvas.winfo_height() / maze.height
         for y in range(maze.height):
             for x in range(maze.width):
                 if maze.grid[y][x] == 1:
-                    self.canvas.create_rectangle(x * cell_width, y * cell_height,
-                                                 (x + 1) * cell_width, (y + 1) * cell_height,
+                    self.canvas.create_rectangle(x * cellWidth, y * cellHeight,
+                                                 (x + 1) * cellWidth, (y + 1) * cellHeight,
                                                  fill="black")
-        start = maze.get_start()
+        start = maze.getStart()
         end = maze.end
-        self.canvas.create_rectangle(start[1] * cell_width, start[0] * cell_height,
-                                     (start[1] + 1) * cell_width, (start[0] + 1) * cell_height,
+        self.canvas.create_rectangle(start[1] * cellWidth, start[0] * cellHeight,
+                                     (start[1] + 1) * cellWidth, (start[0] + 1) * cellHeight,
                                      fill="blue")
-        self.canvas.create_rectangle(end[1] * cell_width, end[0] * cell_height,
-                                     (end[1] + 1) * cell_width, (end[0] + 1) * cell_height,
+        self.canvas.create_rectangle(end[1] * cellWidth, end[0] * cellHeight,
+                                     (end[1] + 1) * cellWidth, (end[0] + 1) * cellHeight,
                                      fill="green")
-        self.canvas.create_oval(bot_position[1] * cell_width, bot_position[0] * cell_height,
-                                (bot_position[1] + 1) * cell_width, (bot_position[0] + 1) * cell_height,
+        self.canvas.create_oval(botPosition[1] * cellWidth, botPosition[0] * cellHeight,
+                                (botPosition[1] + 1) * cellWidth, (botPosition[0] + 1) * cellHeight,
                                 fill="red")
 
-    def display_with_bot_and_heatmap(self, bot_position: tuple[int, int], visited_positions: dict[tuple[int, int], int]) -> None:
-        maze = self.game_env.maze
-        cell_width = self.canvas.winfo_width() / maze.width
-        cell_height = self.canvas.winfo_height() / maze.height
+    def displayWithBotAndHeatmap(self, botPosition: tuple[int, int], visitedPositions: dict[tuple[int, int], int]) -> None:
+        maze = self.gameEnv.maze
+        cellWidth = self.canvas.winfo_width() / maze.width
+        cellHeight = self.canvas.winfo_height() / maze.height
         heatmap = np.zeros((maze.height, maze.width))
-        for (x, y), count in visited_positions.items():
+        for (x, y), count in visitedPositions.items():
             heatmap[x, y] = count
-        max_heat = heatmap.max() if heatmap.max() > 0 else 1
+        maxHeat = heatmap.max() if heatmap.max() > 0 else 1
         cmap = plt.get_cmap("Reds")
         for y in range(maze.height):
             for x in range(maze.width):
                 if maze.grid[y][x] == 1:
-                    self.canvas.create_rectangle(x * cell_width, y * cell_height,
-                                                 (x + 1) * cell_width, (y + 1) * cell_height,
+                    self.canvas.create_rectangle(x * cellWidth, y * cellHeight,
+                                                 (x + 1) * cellWidth, (y + 1) * cellHeight,
                                                  fill="black")
                 else:
-                    heat_value = heatmap[y, x] / max_heat
-                    if heat_value > 0:
-                        color = mcolors.to_hex(cmap(heat_value))
-                        self.canvas.create_rectangle(x * cell_width, y * cell_height,
-                                                     (x + 1) * cell_width, (y + 1) * cell_height,
+                    heatValue = heatmap[y, x] / maxHeat
+                    if heatValue > 0:
+                        color = mcolors.to_hex(cmap(heatValue))
+                        self.canvas.create_rectangle(x * cellWidth, y * cellHeight,
+                                                     (x + 1) * cellWidth, (y + 1) * cellHeight,
                                                      fill=color, outline=color)
-        start = maze.get_start()
+        start = maze.getStart()
         end = maze.end
-        self.canvas.create_rectangle(start[1] * cell_width, start[0] * cell_height,
-                                     (start[1] + 1) * cell_width, (start[0] + 1) * cell_height,
+        self.canvas.create_rectangle(start[1] * cellWidth, start[0] * cellHeight,
+                                     (start[1] + 1) * cellWidth, (start[0] + 1) * cellHeight,
                                      fill="blue")
-        self.canvas.create_rectangle(end[1] * cell_width, end[0] * cell_height,
-                                     (end[1] + 1) * cell_width, (end[0] + 1) * cell_height,
+        self.canvas.create_rectangle(end[1] * cellWidth, end[0] * cellHeight,
+                                     (end[1] + 1) * cellWidth, (end[0] + 1) * cellHeight,
                                      fill="green")
-        self.canvas.create_oval(bot_position[1] * cell_width, bot_position[0] * cell_height,
-                                (bot_position[1] + 1) * cell_width, (bot_position[0] + 1) * cell_height,
+        self.canvas.create_oval(botPosition[1] * cellWidth, botPosition[0] * cellHeight,
+                                (botPosition[1] + 1) * cellWidth, (botPosition[0] + 1) * cellHeight,
                                 fill="red")
 
-    def on_close(self) -> None:
+    def onClose(self) -> None:
         self.visualize = False
-        if self.after_id is not None:
-            self.after_cancel(self.after_id)
+        if self.afterId is not None:
+            self.after_cancel(self.afterId)
         try:
-            self.game_env.resume_training_for(self.profile_name)
+            self.gameEnv.resumeTrainingFor(self.profileName)
         except Exception:
             pass
         try:
             controller = getattr(self.master, 'controller', None)
             if controller and hasattr(controller, 'frames') and 'BotTrainingFrame' in controller.frames:
-                controller.frames['BotTrainingFrame'].status_hint.configure(text="")
+                controller.frames['BotTrainingFrame'].statusHint.configure(text="")
         except Exception:
             pass
         self.destroy()
@@ -146,144 +146,144 @@ class VisualizationFrame(tk.Frame):
     def __init__(self, parent: Any, controller: Any) -> None:
         super().__init__(parent)
         self.controller = controller
-        self.visualization_strategies = {
+        self.visualizationStrategies = {
             'QLearningBot': QLearningBotVisualizationStrategy(),
         }
-        self.canvas_agg: Any = None
+        self.canvasAgg: Any = None
 
         ttk.Label(self, text="Visualizations", font=("TkDefaultFont", 20)).pack(pady=10, padx=10)
         self.canvas = tk.Canvas(self, height=600, width=1000)
         self.scrollbar = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
         self.scrollbar.pack(side="right", fill="y")
         self.canvas.pack(side="left", fill="both", expand=True)
-        self.scrollable_frame = tk.Frame(self.canvas)
-        self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
-        self.scrollable_frame.bind("<Configure>", self.on_frame_configure)
+        self.scrollableFrame = tk.Frame(self.canvas)
+        self.canvas.create_window((0, 0), window=self.scrollableFrame, anchor="nw")
+        self.scrollableFrame.bind("<Configure>", self.onFrameConfigure)
         self.canvas.configure(yscrollcommand=self.scrollbar.set)
 
-        def _wheel_scroll(event: Any) -> str:
+        def _wheelScroll(event: Any) -> str:
             units = -1 if getattr(event, 'delta', 0) > 0 or getattr(event, 'num', None) == 4 else 1
             try:
                 self.canvas.yview_scroll(units, 'units')
             except Exception:
                 pass
             return "break"
-        self.canvas.bind('<MouseWheel>', _wheel_scroll)
-        self.canvas.bind('<Button-4>', _wheel_scroll)
-        self.canvas.bind('<Button-5>', _wheel_scroll)
+        self.canvas.bind('<MouseWheel>', _wheelScroll)
+        self.canvas.bind('<Button-4>', _wheelScroll)
+        self.canvas.bind('<Button-5>', _wheelScroll)
 
-        ttk.Label(self.scrollable_frame, text="Select Profile:").pack()
-        self.profile_select = ttk.Combobox(self.scrollable_frame)
-        self.profile_select.pack()
+        ttk.Label(self.scrollableFrame, text="Select Profile:").pack()
+        self.profileSelect = ttk.Combobox(self.scrollableFrame)
+        self.profileSelect.pack()
 
-        ttk.Button(self.scrollable_frame, text="Load Profile", command=self.load_profile).pack(pady=10)
-        self.heatmap_frame = tk.Frame(self.scrollable_frame)
-        self.heatmap_frame.pack(pady=10)
-        ttk.Label(self.heatmap_frame, text="Latest Maze").grid(row=0, column=0, pady=10)
-        self.heatmap_canvas_latest = tk.Canvas(self.heatmap_frame, width=300, height=300, bg="white")
-        self.heatmap_canvas_latest.grid(row=1, column=0, padx=5)
-        ttk.Label(self.heatmap_frame, text="Highest Reward Maze").grid(row=0, column=1, pady=10)
-        self.heatmap_canvas_highest = tk.Canvas(self.heatmap_frame, width=300, height=300, bg="white")
-        self.heatmap_canvas_highest.grid(row=1, column=1, padx=5)
-        ttk.Label(self.heatmap_frame, text="Lowest Reward Maze").grid(row=0, column=2, pady=10)
-        self.heatmap_canvas_lowest = tk.Canvas(self.heatmap_frame, width=300, height=300, bg="white")
-        self.heatmap_canvas_lowest.grid(row=1, column=2, padx=5)
-        ttk.Label(self.scrollable_frame, text="Reward Graph Visualization:").pack(pady=10)
-        self.reward_canvas = tk.Canvas(self.scrollable_frame, width=800, height=400)
-        self.reward_canvas.pack(pady=10)
-        ttk.Label(self.scrollable_frame, text="Q-Table Visualization:").pack(pady=10)
-        self.qtable_output = tk.Text(self.scrollable_frame, height=10, width=50)
-        self.qtable_output.pack(pady=10)
-        self.qtable_scrollbar = ttk.Scrollbar(self.scrollable_frame, command=self.qtable_output.yview)
-        self.qtable_scrollbar.pack(side="right", fill="y")
-        self.qtable_output.config(yscrollcommand=self.qtable_scrollbar.set)
-        ttk.Label(self.scrollable_frame, text="Statistics:").pack(pady=10)
-        self.statistics_output = tk.Text(self.scrollable_frame, height=5, width=50)
-        self.statistics_output.pack(pady=10)
-        self.load_profiles()
+        ttk.Button(self.scrollableFrame, text="Load Profile", command=self.loadProfile).pack(pady=10)
+        self.heatmapFrame = tk.Frame(self.scrollableFrame)
+        self.heatmapFrame.pack(pady=10)
+        ttk.Label(self.heatmapFrame, text="Latest Maze").grid(row=0, column=0, pady=10)
+        self.heatmapCanvasLatest = tk.Canvas(self.heatmapFrame, width=300, height=300, bg="white")
+        self.heatmapCanvasLatest.grid(row=1, column=0, padx=5)
+        ttk.Label(self.heatmapFrame, text="Highest Reward Maze").grid(row=0, column=1, pady=10)
+        self.heatmapCanvasHighest = tk.Canvas(self.heatmapFrame, width=300, height=300, bg="white")
+        self.heatmapCanvasHighest.grid(row=1, column=1, padx=5)
+        ttk.Label(self.heatmapFrame, text="Lowest Reward Maze").grid(row=0, column=2, pady=10)
+        self.heatmapCanvasLowest = tk.Canvas(self.heatmapFrame, width=300, height=300, bg="white")
+        self.heatmapCanvasLowest.grid(row=1, column=2, padx=5)
+        ttk.Label(self.scrollableFrame, text="Reward Graph Visualization:").pack(pady=10)
+        self.rewardCanvas = tk.Canvas(self.scrollableFrame, width=800, height=400)
+        self.rewardCanvas.pack(pady=10)
+        ttk.Label(self.scrollableFrame, text="Q-Table Visualization:").pack(pady=10)
+        self.qtableOutput = tk.Text(self.scrollableFrame, height=10, width=50)
+        self.qtableOutput.pack(pady=10)
+        self.qtableScrollbar = ttk.Scrollbar(self.scrollableFrame, command=self.qtableOutput.yview)
+        self.qtableScrollbar.pack(side="right", fill="y")
+        self.qtableOutput.config(yscrollcommand=self.qtableScrollbar.set)
+        ttk.Label(self.scrollableFrame, text="Statistics:").pack(pady=10)
+        self.statisticsOutput = tk.Text(self.scrollableFrame, height=5, width=50)
+        self.statisticsOutput.pack(pady=10)
+        self.loadProfiles()
 
-    def on_frame_configure(self, event: Any) -> None:
+    def onFrameConfigure(self, event: Any) -> None:
         self.canvas.configure(scrollregion=self.canvas.bbox("all"))
 
-    def load_profiles(self) -> None:
-        profiles = self.controller.game_env.profile_manager.list_profiles()
-        self.profile_select['values'] = profiles
+    def loadProfiles(self) -> None:
+        profiles = self.controller.gameEnv.profileManager.listProfiles()
+        self.profileSelect['values'] = profiles
 
-    def load_profile(self) -> None:
-        selected_profile = self.profile_select.get()
-        if not selected_profile:
+    def loadProfile(self) -> None:
+        selectedProfile = self.profileSelect.get()
+        if not selectedProfile:
             messagebox.showerror("Error", "No profile selected.")
             return
-        profile = self.controller.game_env.profile_manager.load_profile(selected_profile)
-        profile_index = self.controller.game_env.apply_profile(profile)
-        bot = self.controller.game_env.bots[profile_index]
-        strategy = self.visualization_strategies.get(profile.bot_type)
+        profile = self.controller.gameEnv.profileManager.loadProfile(selectedProfile)
+        profileIndex = self.controller.gameEnv.applyProfile(profile)
+        bot = self.controller.gameEnv.bots[profileIndex]
+        strategy = self.visualizationStrategies.get(profile.botType)
         if strategy:
-            strategy.visualize(self, bot, profile_index)
+            strategy.visualize(self, bot, profileIndex)
 
-    def display_heatmap(self, canvas: Any, maze: Any, start: Any, end: Any, heatmap_data: Any) -> None:
+    def displayHeatmap(self, canvas: Any, maze: Any, start: Any, end: Any, heatmapData: Any) -> None:
         try:
-            DisplayTools.display_heatmap(canvas, maze, start, end, heatmap_data)
+            DisplayTools.displayHeatmap(canvas, maze, start, end, heatmapData)
         except Exception:
             pass
 
-    def display_qtable(self, bot: Any, profile_index: int) -> None:
-        self.qtable_output.delete("1.0", tk.END)
-        if hasattr(bot, 'q_learning') and hasattr(bot.q_learning, 'q_table'):
-            top_values = self.get_top_q_values(bot, profile_index)
-            self.qtable_output.insert(tk.END, "Top Q-Table Values:\n")
-            for i, (q_value, (state, actions)) in enumerate(top_values):
-                position, surrounding, step_count = state
-                best_action_index = int(np.argmax(actions))
-                best_action = self.get_action_label(best_action_index)
-                best_q_value = q_value
-                self.qtable_output.insert(tk.END, f"Rank {i+1}:\n")
-                self.qtable_output.insert(tk.END, f"  Current Position: {position}\n")
-                self.qtable_output.insert(tk.END, f"  Surrounding: {surrounding}\n")
-                self.qtable_output.insert(tk.END, f"  Step Count: {step_count}\n")
-                self.qtable_output.insert(tk.END, f"  Best Action: {best_action}\n")
-                self.qtable_output.insert(tk.END, f"  Best Q-value: {best_q_value}\n\n")
+    def displayQtable(self, bot: Any, profileIndex: int) -> None:
+        self.qtableOutput.delete("1.0", tk.END)
+        if hasattr(bot, 'q_learning') and hasattr(bot.qLearning, 'q_table'):
+            topValues = self.getTopQValues(bot, profileIndex)
+            self.qtableOutput.insert(tk.END, "Top Q-Table Values:\n")
+            for i, (qValue, (state, actions)) in enumerate(topValues):
+                position, surrounding, stepCount = state
+                bestActionIndex = int(np.argmax(actions))
+                bestAction = self.getActionLabel(bestActionIndex)
+                bestQValue = qValue
+                self.qtableOutput.insert(tk.END, f"Rank {i+1}:\n")
+                self.qtableOutput.insert(tk.END, f"  Current Position: {position}\n")
+                self.qtableOutput.insert(tk.END, f"  Surrounding: {surrounding}\n")
+                self.qtableOutput.insert(tk.END, f"  Step Count: {stepCount}\n")
+                self.qtableOutput.insert(tk.END, f"  Best Action: {bestAction}\n")
+                self.qtableOutput.insert(tk.END, f"  Best Q-value: {bestQValue}\n\n")
         else:
-            self.qtable_output.insert(tk.END, "No tabular Q-table available for this bot.\n")
+            self.qtableOutput.insert(tk.END, "No tabular Q-table available for this bot.\n")
 
-    def display_statistics(self, bot: Any, profile_index: int) -> None:
-        self.statistics_output.delete("1.0", tk.END)
+    def displayStatistics(self, bot: Any, profileIndex: int) -> None:
+        self.statisticsOutput.delete("1.0", tk.END)
         try:
-            repo = self.controller.game_env.repository
-            profile_data = repo.read_profile_stats(bot.profile_name) or {}
+            repo = self.controller.gameEnv.repository
+            profileData = repo.readProfileStats(bot.profileName) or {}
         except Exception:
-            profile_data = {}
-        self.statistics_output.insert(tk.END, f"Total Steps: {profile_data.get('total_steps', 0)}\n")
-        self.statistics_output.insert(tk.END, f"Non-Repeating Steps: {profile_data.get('non_repeating_steps_taken', 0)}\n")
-        self.statistics_output.insert(tk.END, f"Times Revisited Squares: {profile_data.get('times_revisited_squares', 0)}\n")
-        self.statistics_output.insert(tk.END, f"Times Bot Hit Wall: {profile_data.get('times_hit_wall', 0)}\n")
+            profileData = {}
+        self.statisticsOutput.insert(tk.END, f"Total Steps: {profileData.get('total_steps', 0)}\n")
+        self.statisticsOutput.insert(tk.END, f"Non-Repeating Steps: {profileData.get('non_repeating_steps_taken', 0)}\n")
+        self.statisticsOutput.insert(tk.END, f"Times Revisited Squares: {profileData.get('times_revisited_squares', 0)}\n")
+        self.statisticsOutput.insert(tk.END, f"Times Bot Hit Wall: {profileData.get('times_hit_wall', 0)}\n")
 
-    def display_reward_graph(self, bot: Any) -> None:
-        if self.canvas_agg:
-            self.canvas_agg.get_tk_widget().destroy()
+    def displayRewardGraph(self, bot: Any) -> None:
+        if self.canvasAgg:
+            self.canvasAgg.get_tk_widget().destroy()
         try:
-            reward_path = self.controller.game_env.repository.rewards_path(bot.profile_name)
+            rewardPath = self.controller.gameEnv.repository.rewardsPath(bot.profileName)
         except Exception:
-            reward_path = f'profiles/{bot.profile_name}/SimulationRewards.txt'
-        reward_filenames = [reward_path]
-        grapher = RewardGrapher(reward_filenames)
-        self.canvas_agg = grapher.run(self.reward_canvas)
+            rewardPath = f'profiles/{bot.profileName}/SimulationRewards.txt'
+        rewardFilenames = [rewardPath]
+        grapher = RewardGrapher(rewardFilenames)
+        self.canvasAgg = grapher.run(self.rewardCanvas)
 
-    def get_top_q_values(self, bot: Any, profile_index: int, n: int = 10) -> list[Any]:
-        q_table = bot.q_learning.q_table
-        q_table_items = list(q_table.items())
-        top_items = []
-        for item in q_table_items:
-            q_value = np.max(item[1])
-            if len(top_items) < n:
-                top_items.append((q_value, item))
-                top_items.sort(reverse=True, key=lambda item: item[0])
+    def getTopQValues(self, bot: Any, profileIndex: int, n: int = 10) -> list[Any]:
+        qTable = bot.qLearning.qTable
+        qTableItems = list(qTable.items())
+        topItems = []
+        for item in qTableItems:
+            qValue = np.max(item[1])
+            if len(topItems) < n:
+                topItems.append((qValue, item))
+                topItems.sort(reverse=True, key=lambda item: item[0])
             else:
-                if q_value > top_items[-1][0]:
-                    top_items[-1] = (q_value, item)
-                    top_items.sort(reverse=True, key=lambda item: item[0])
-        return top_items
+                if qValue > topItems[-1][0]:
+                    topItems[-1] = (qValue, item)
+                    topItems.sort(reverse=True, key=lambda item: item[0])
+        return topItems
 
-    def get_action_label(self, action_index: int) -> str:
-        action_labels = ["Up", "Down", "Left", "Right"]
-        return action_labels[action_index]
+    def getActionLabel(self, actionIndex: int) -> str:
+        actionLabels = ["Up", "Down", "Left", "Right"]
+        return actionLabels[actionIndex]

@@ -12,38 +12,38 @@ class ProfileManagementFrame(tk.Frame):
         self.controller = controller
 
         ttk.Label(self, text="Profile Management", font=("TkDefaultFont", 20)).pack(pady=10, padx=10)
-        ttk.Button(self, text="Create New Profile", command=self.create_new_profile).pack(pady=10)
+        ttk.Button(self, text="Create New Profile", command=self.createNewProfile).pack(pady=10)
 
-        self.profile_list = tk.Listbox(self)
-        self.profile_list.pack(pady=10)
-        self.load_profiles()
-        self.profile_list.bind("<Double-Button-1>", self.on_profile_double_click)
+        self.profileList = tk.Listbox(self)
+        self.profileList.pack(pady=10)
+        self.loadProfiles()
+        self.profileList.bind("<Double-Button-1>", self.onProfileDoubleClick)
 
-        ttk.Button(self, text="Delete Profile", command=self.delete_profile).pack(pady=10)
+        ttk.Button(self, text="Delete Profile", command=self.deleteProfile).pack(pady=10)
 
-    def on_show(self) -> None:
+    def onShow(self) -> None:
         # Refresh when navigated back
-        self.load_profiles()
+        self.loadProfiles()
 
-    def load_profiles(self) -> None:
-        DisplayTools.load_profiles(self.controller.game_env.profile_manager, self.profile_list)
+    def loadProfiles(self) -> None:
+        DisplayTools.loadProfiles(self.controller.gameEnv.profileManager, self.profileList)
 
-    def create_new_profile(self) -> None:
-        self.controller.show_create_edit_profile()
+    def createNewProfile(self) -> None:
+        self.controller.showCreateEditProfile()
 
-    def on_profile_double_click(self, event: Any) -> None:
-        selected_index = self.profile_list.curselection()
-        if selected_index:
-            profile_name = str(self.profile_list.get(selected_index[0]))
-            self.load_profile(profile_name)
+    def onProfileDoubleClick(self, event: Any) -> None:
+        selectedIndex = self.profileList.curselection()
+        if selectedIndex:
+            profileName = str(self.profileList.get(selectedIndex[0]))
+            self.loadProfile(profileName)
 
-    def load_profile(self, profile_name: str) -> None:
-        profile = self.controller.game_env.profile_manager.load_profile(profile_name)
-        self.controller.show_create_edit_profile(profile)
+    def loadProfile(self, profileName: str) -> None:
+        profile = self.controller.gameEnv.profileManager.loadProfile(profileName)
+        self.controller.showCreateEditProfile(profile)
 
-    def delete_profile(self) -> None:
-        DisplayTools.delete_profile(self.controller.game_env.profile_manager, self.profile_list)
-        self.load_profiles()
-        self.controller.frames["BotTrainingFrame"].load_profiles()
-        self.controller.frames["VisualizationFrame"].load_profiles()
+    def deleteProfile(self) -> None:
+        DisplayTools.deleteProfile(self.controller.gameEnv.profileManager, self.profileList)
+        self.loadProfiles()
+        self.controller.frames["BotTrainingFrame"].loadProfiles()
+        self.controller.frames["VisualizationFrame"].loadProfiles()
 

@@ -8,13 +8,13 @@ class RewardConfig:
         """
         Initialize the RewardConfig with default values or provided keyword arguments.
         """
-        self.goal_reward: int = kwargs.get('goal_reward', 1000)
-        self.wall_penalty: int = kwargs.get('wall_penalty', -100)
-        self.revisit_penalty_optimal: int = kwargs.get('revisit_penalty_optimal', -10)
-        self.revisit_penalty_non_optimal: int = kwargs.get('revisit_penalty_non_optimal', -15)
-        self.step_penalty: int = kwargs.get('step_penalty', -1)
-        self.goal_in_sight_reward: int = kwargs.get('goal_in_sight_reward', 50)
-        self.reward_modifiers: dict[str, str] = kwargs.get('reward_modifiers', {
+        self.goalReward: int = kwargs.get('goal_reward', 1000)
+        self.wallPenalty: int = kwargs.get('wall_penalty', -100)
+        self.revisitPenaltyOptimal: int = kwargs.get('revisit_penalty_optimal', -10)
+        self.revisitPenaltyNonOptimal: int = kwargs.get('revisit_penalty_non_optimal', -15)
+        self.stepPenalty: int = kwargs.get('step_penalty', -1)
+        self.goalInSightReward: int = kwargs.get('goal_in_sight_reward', 50)
+        self.rewardModifiers: dict[str, str] = kwargs.get('reward_modifiers', {
             'goal_reached': '1000',
             'hit_wall': '-100',
             'revisit_optimal_path': '-10',
@@ -25,22 +25,22 @@ class RewardConfig:
             'per_move_penalty': '-1'
         })
         # Potential-based reward shaping (progress toward goal), helpful for randomized mazes
-        self.use_potential_shaping: bool = kwargs.get('use_potential_shaping', False)
-        self.progress_scale: float = kwargs.get('progress_scale', 5.0)
+        self.usePotentialShaping: bool = kwargs.get('use_potential_shaping', False)
+        self.progressScale: float = kwargs.get('progress_scale', 5.0)
 
-    def update_from_dict(self, config_dict: dict[str, Any]) -> None:
+    def updateFromDict(self, configDict: dict[str, Any]) -> None:
         """
         Update the attributes of RewardConfig from a dictionary.
         """
-        for key, value in config_dict.items():
+        for key, value in configDict.items():
             if hasattr(self, key):
                 setattr(self, key, value)
                 # Also update the corresponding reward modifier if applicable
-                if key in self.reward_modifiers:
-                    self.reward_modifiers[key] = str(value)
+                if key in self.rewardModifiers:
+                    self.rewardModifiers[key] = str(value)
 
-    def get_modifier(self, key: str, default: str = "0") -> str:
-        return self.reward_modifiers.get(key, default)
+    def getModifier(self, key: str, default: str = "0") -> str:
+        return self.rewardModifiers.get(key, default)
 class MazeSensors:
     """Minimal sensor interface used by RewardSystem.
 
@@ -49,7 +49,7 @@ class MazeSensors:
     def __init__(self, maze: Any) -> None:
         self.maze = maze
 
-    def goal_in_sight(self, pos: tuple[int, int]) -> int:
+    def goalInSight(self, pos: tuple[int, int]) -> int:
         directions = [(1, 0), (-1, 0), (0, 1), (0, -1)]
         for dx, dy in directions:
             cy, cx = pos
@@ -65,16 +65,16 @@ class MazeSensors:
 
 
 class RewardSystem:
-    def __init__(self, maze: Any, reward_config: RewardConfig, sensors: MazeSensors | None = None) -> None:
+    def __init__(self, maze: Any, rewardConfig: RewardConfig, sensors: MazeSensors | None = None) -> None:
         self.maze = maze
-        self.reward_config = reward_config
-        self.cumulative_reward = 0
-        self.times_hit_wall = 0
-        self.times_revisited_square = 0
-        self.non_repeating_steps_taken = 0
+        self.rewardConfig = rewardConfig
+        self.cumulativeReward = 0
+        self.timesHitWall = 0
+        self.timesRevisitedSquare = 0
+        self.nonRepeatingStepsTaken = 0
         self.sensors = sensors or MazeSensors(maze)
     
-    def evaluate_expression(self, expression: Any, **kwargs: Any) -> float:
+    def evaluateExpression(self, expression: Any, **kwargs: Any) -> float:
         """
         Safely evaluate a numeric expression.
         Accepts numbers or simple arithmetic strings. Disallows names/calls.
@@ -91,13 +91,13 @@ class RewardSystem:
         # Safe AST evaluation for +,-,*,/ and parentheses
         try:
             node = ast.parse(s, mode='eval')
-            return float(self._eval_ast(node.body))
+            return float(self._evalAst(node.body))
         except Exception:
             # Fallback to zero on invalid input
             return 0.0
 
-    def _eval_ast(self, node: Any) -> float:
-        bin_ops: dict[type[Any], Callable[[float, float], float]] = {
+    def _evalAst(self, node: Any) -> float:
+        binOps: dict[type[Any], Callable[[float, float], float]] = {
             ast.Add: lambda a, b: a + b,
             ast.Sub: lambda a, b: a - b,
             ast.Mult: lambda a, b: a * b,
@@ -105,7 +105,7 @@ class RewardSystem:
             ast.FloorDiv: lambda a, b: a // b,
             ast.Mod: lambda a, b: a % b,
         }
-        unary_ops: dict[type[Any], Callable[[float], float]] = {
+        unaryOps: dict[type[Any], Callable[[float], float]] = {
             ast.USub: lambda a: -a,
             ast.UAdd: lambda a: +a,
         }
@@ -114,24 +114,24 @@ class RewardSystem:
                 return float(node.value)
             raise ValueError("Non-numeric constant")
         if isinstance(node, ast.UnaryOp):
-            fn = unary_ops.get(type(node.op))
+            fn = unaryOps.get(type(node.op))
             if fn is None:
                 raise ValueError("Unsupported unary operator")
-            return fn(self._eval_ast(node.operand))
+            return fn(self._evalAst(node.operand))
         if isinstance(node, ast.BinOp):
-            fn2 = bin_ops.get(type(node.op))
+            fn2 = binOps.get(type(node.op))
             if fn2 is None:
                 raise ValueError("Unsupported binary operator")
-            return fn2(self._eval_ast(node.left), self._eval_ast(node.right))
+            return fn2(self._evalAst(node.left), self._evalAst(node.right))
         raise ValueError("Unsupported expression")
 
-    def get_reward(
+    def getReward(
         self,
-        prev_position: tuple[int, int],
-        new_position: tuple[int, int],
-        optimal_path: list[tuple[int, int]],
-        optimal_length: int,
-        visited_positions: dict[tuple[int, int], int],
+        prevPosition: tuple[int, int],
+        newPosition: tuple[int, int],
+        optimalPath: list[tuple[int, int]],
+        optimalLength: int,
+        visitedPositions: dict[tuple[int, int], int],
     ) -> float:
         """
         Calculate the reward for moving to a new position.
@@ -146,65 +146,65 @@ class RewardSystem:
         reward = 0
 
         context = {
-            'optimal_length': optimal_length,
-            'visited_positions': visited_positions,
-            'optimal_path': optimal_path,
-            'new_position': new_position
+            'optimal_length': optimalLength,
+            'visited_positions': visitedPositions,
+            'optimal_path': optimalPath,
+            'new_position': newPosition
         }
 
 
-        for key, expr in self.reward_config.reward_modifiers.items():
+        for key, expr in self.rewardConfig.rewardModifiers.items():
             # Use configured values directly (no scaling by path length)
-            value_expr = str(expr)
+            valueExpr = str(expr)
 
-            if key == 'goal_reached' and new_position == self.maze.end:
-                reward += self.evaluate_expression(value_expr, **context)
-            elif key == 'hit_wall' and not self.maze.is_valid_position(None, *new_position):
-                reward += self.evaluate_expression(value_expr, **context)
-            elif key == 'revisit_optimal_path' and new_position in visited_positions and new_position in optimal_path:
-                reward += self.evaluate_expression(value_expr, **context)
-            elif key == 'revisit_non_optimal_path' and new_position in visited_positions and new_position not in optimal_path:
-                reward += self.evaluate_expression(value_expr, **context)
-            elif key == 'move_in_optimal_path' and new_position in optimal_path:
-                reward += self.evaluate_expression(value_expr, **context)
-            elif key == 'see_goal_new_location' and self.sensors.goal_in_sight(new_position) and new_position not in visited_positions:
-                reward += self.evaluate_expression(value_expr, **context)
-            elif key == 'see_goal_revisit' and self.sensors.goal_in_sight(new_position) and new_position in visited_positions:
-                reward += self.evaluate_expression(value_expr, **context)
+            if key == 'goal_reached' and newPosition == self.maze.end:
+                reward += self.evaluateExpression(valueExpr, **context)
+            elif key == 'hit_wall' and not self.maze.isValidPosition(None, *newPosition):
+                reward += self.evaluateExpression(valueExpr, **context)
+            elif key == 'revisit_optimal_path' and newPosition in visitedPositions and newPosition in optimalPath:
+                reward += self.evaluateExpression(valueExpr, **context)
+            elif key == 'revisit_non_optimal_path' and newPosition in visitedPositions and newPosition not in optimalPath:
+                reward += self.evaluateExpression(valueExpr, **context)
+            elif key == 'move_in_optimal_path' and newPosition in optimalPath:
+                reward += self.evaluateExpression(valueExpr, **context)
+            elif key == 'see_goal_new_location' and self.sensors.goalInSight(newPosition) and newPosition not in visitedPositions:
+                reward += self.evaluateExpression(valueExpr, **context)
+            elif key == 'see_goal_revisit' and self.sensors.goalInSight(newPosition) and newPosition in visitedPositions:
+                reward += self.evaluateExpression(valueExpr, **context)
             elif key == 'per_move_penalty':
-                reward += self.evaluate_expression(value_expr, **context)
+                reward += self.evaluateExpression(valueExpr, **context)
         
         # Potential-based shaping: reward progress toward goal (distance reduction)
-        if self.reward_config.use_potential_shaping:
+        if self.rewardConfig.usePotentialShaping:
             # Manhattan distance tends to be stable in grid mazes
             def manhattan(a: tuple[int, int], b: tuple[int, int]) -> int:
                 return abs(a[0]-b[0]) + abs(a[1]-b[1])
-            prev_d = manhattan(prev_position, self.maze.end)
-            new_d = manhattan(new_position, self.maze.end)
-            progress = prev_d - new_d  # positive if closer
-            reward += self.reward_config.progress_scale * progress
+            prevD = manhattan(prevPosition, self.maze.end)
+            newD = manhattan(newPosition, self.maze.end)
+            progress = prevD - newD  # positive if closer
+            reward += self.rewardConfig.progressScale * progress
 
         return reward
 
-    def update_rewards(self, reward: int) -> None:
+    def updateRewards(self, reward: int) -> None:
         """
         Update cumulative rewards and other statistics.
         
         :param reward: The reward to update.
         """
-        self.cumulative_reward += reward
-        if reward == self.evaluate_expression(self.reward_config.get_modifier('hit_wall')):
-            self.times_hit_wall += 1
-        elif reward == self.evaluate_expression(self.reward_config.get_modifier('revisit_non_optimal_path')):
-            self.times_revisited_square += 1
+        self.cumulativeReward += reward
+        if reward == self.evaluateExpression(self.rewardConfig.getModifier('hit_wall')):
+            self.timesHitWall += 1
+        elif reward == self.evaluateExpression(self.rewardConfig.getModifier('revisit_non_optimal_path')):
+            self.timesRevisitedSquare += 1
         else:
-            self.non_repeating_steps_taken += 1
+            self.nonRepeatingStepsTaken += 1
 
-    def reset_rewards(self) -> None:
+    def resetRewards(self) -> None:
         """
         Reset rewards and other statistics at the start of each episode.
         """
-        self.cumulative_reward = 0
-        self.times_hit_wall = 0
-        self.times_revisited_square = 0
-        self.non_repeating_steps_taken = 0
+        self.cumulativeReward = 0
+        self.timesHitWall = 0
+        self.timesRevisitedSquare = 0
+        self.nonRepeatingStepsTaken = 0
