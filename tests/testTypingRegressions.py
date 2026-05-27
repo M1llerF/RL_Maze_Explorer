@@ -14,7 +14,7 @@ from botConfigs import QLearningConfig, botConfigs
 from botFactory import BotFactory
 from botProfile import BotProfile, ProfileManager
 from botStatistics import BotStatistics
-from qLearningBot import QLearning, QLearningBot
+from bots.qlearning import QLearning, QLearningBot
 from rewardSystem import RewardConfig
 from rewardSystem import RewardSystem
 from services.runners import QLearningEpisodeRunner

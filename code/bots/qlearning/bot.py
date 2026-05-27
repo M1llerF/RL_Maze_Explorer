@@ -4,7 +4,7 @@ from typing import Any, cast
 from botStatistics import BotStatistics
 from baseBot import BaseBot
 from botTools import BotTools
-from botConfigs import QLearningConfig
+from .config import QLearningConfig
 from services.repository import ArtifactsRepository
 from services.runners import QLearningEpisodeRunner
 

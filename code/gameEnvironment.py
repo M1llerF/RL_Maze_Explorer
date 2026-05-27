@@ -6,6 +6,7 @@ from typing import Any, Optional, cast
 import threading
 import time
 from services.repository import ArtifactsRepository
+from bots import discoverBotClasses
 import os
 
 class GameEnvironment:
@@ -88,11 +89,8 @@ class GameEnvironment:
         """
         Register available bots with the bot factory.
         """
-        from qLearningBot import QLearningBot  # Ensure QLearningBot is imported only when needed
-        self.botFactory.registerBot('QLearningBot', QLearningBot)
-        # Register other bots as needed
-        # self.bot_factory.register_bot('AnotherBot', AnotherBot)
-        # Additional bots can be registered here
+        for botType, botClass in discoverBotClasses().items():
+            self.botFactory.registerBot(botType, botClass)
         
     def setupNewProfile(self, profileName: str, botType: str, config: Any, rewardConfig: Any) -> None:
         """

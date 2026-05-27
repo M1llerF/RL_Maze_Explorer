@@ -1,0 +1,103 @@
+@startuml
+title RL Maze Explorer - Component Map With Extension Contracts
+skinparam packageStyle rectangle
+left to right direction
+skinparam componentStyle rectangle
+skinparam defaultTextAlignment center
+
+package "UI" {
+  [MazeAIApp\ncode/ui/app.py\nowns shared services] as App
+  [ProfileManagementFrame\ncode/ui/frames/profileManagement.py\nlist/load profiles] as PMF
+  [CreateEditProfileFrame\ncode/ui/frames/createEditProfile.py\nBOT_SPEC-rendered form\nQLearning-only config save] as CEP
+  [BotTrainingFrame\ncode/ui/frames/training.py\nstart/stop + maze source] as BTF
+  [VisualizationFrame / Window\ncode/ui/frames/visualization.py\nreports + live stepping] as VF
+}
+
+package "Orchestration" {
+  [GameEnvironment\ncode/gameEnvironment.py\nmaze, profiles, bots, reset policy] as GE
+  [BotFactory\ncode/botFactory.py\nregistry + constructor injection] as BF
+  [ProfileManager\ncode/botProfile.py\npickle profile load/save] as ProfMgr
+  [TrainingController\ncode/services/training.py\nbackground thread + callbacks] as TC
+}
+
+package "Bots" {
+  [BaseBot\ncode/baseBot.py\nrequired runtime hooks] as Base
+  [bots/__init__.py\ndiscoverBotSpecs()\ndiscoverBotClasses()] as Discover
+  [botConfigs.py\nbotConfigs + buildConfigForBotType()] as Configs
+  [bots.qlearning.config\nQLearningConfig\nBOT_SPEC params/rewards] as QCfg
+  [bots.qlearning.bot\nQLearningBot\ntraining + visualization contract] as QBot
+  [bots.<newbot>.*\nfuture bot package\nsame exports + contract] as NewBot
+}
+
+package "Core / Infra" {
+  [Maze\ncode/maze.py\ngrid/start/end/state] as Maze
+  [RewardSystem + MazeSensors\ncode/rewardSystem.py\nreward evaluation] as Reward
+  [ArtifactsRepository\ncode/services/repository.py\natomic profile artifacts] as Repo
+  [QLearningEpisodeRunner\ncode/services/runners.py\ntraining loop + persistence] as Runner
+  [BotStatistics\ncode/botStatistics.py\nvisited cells + counters] as Stats
+}
+
+database "profiles/<name>/" as Profiles {
+  [profile.pkl]
+  [q_table.pkl + q_table.checksum]
+  [mazes.json]
+  [SimulationRewards.txt]
+  [artifacts/*]
+}
+
+folder "mazes/*.json" as MazeFiles
+
+App --> GE : creates
+App --> TC : creates with GE
+PMF --> GE : profileManager.list/load
+CEP --> Configs : bot type list + rendered params/rewards
+CEP --> GE : setupNewProfile()
+BTF --> TC : start()/stop()
+BTF --> GE : fixed maze check/source
+VF --> GE : applyProfile(), pause/resume
+VF --> Repo : rewardsPath(), readProfileStats()
+
+TC --> GE : profileManager.loadProfile(),\napplyProfile(), configureTrainingPool(),\nresetEnvironment()
+TC --> QBot : runEpisode()
+GE --> BF : createBot()
+GE --> ProfMgr : load/save profiles
+GE --> Maze : setupSimpleMaze(), setState()
+GE --> Repo : shared repository instance
+GE --> Discover : registerBots() -> discoverBotClasses()
+
+BF --> Reward : builds RewardSystem(maze, rewardConfig, MazeSensors)
+BF --> QBot : constructor injection by accepted kwargs
+BF --> NewBot : same constructor injection path
+BF --> Repo : injects shared repository
+BF --> Stats : receives profile statistics
+
+Configs --> Discover : discoverBotSpecs()
+Configs --> QCfg : config class + defaults
+Configs --> NewBot : future BOT_SPEC entries
+ProfMgr --> Configs : buildConfigForBotType() on load
+
+QBot -up-|> Base
+NewBot -up-|> Base
+QBot --> Runner : delegates runEpisode()
+Runner --> QBot : chooseAction/updateQValue/move hooks
+QBot --> Reward : getReward()
+QBot --> Repo : load/save Q-table, maze metadata
+Runner --> Repo : saveMazeEpisode(), appendReward(), counters
+Repo --> Profiles : atomic writes/reads
+BTF --> MazeFiles : optional fixed training maze
+GE --> MazeFiles : fixedMazeState source
+
+note right of Base
+  Bot runtime contract:
+  reset(), calculateState(), runEpisode(),
+  onEpisodeStart(mode), onEpisodeStep(mode, stepIndex),
+  onEpisodeEnd(mode, outcome).
+end note
+
+note bottom of Configs
+  BOT_SPEC drives profile-control rendering and profile-load rebuilding.
+  Profile creation currently still needs CreateEditProfileFrame.saveProfile()
+  changes for every non-QLearning config, even if fields are numeric.
+end note
+
+@enduml
