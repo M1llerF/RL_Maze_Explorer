@@ -2,7 +2,7 @@ import os
 import tkinter as tk
 from typing import Any
 
-from GameEnvironment import GameEnvironment
+from gameEnvironment import GameEnvironment
 from services.training import TrainingController
 
 
@@ -48,10 +48,10 @@ class MazeAIApp:
 
     def create_main_frames(self):
         # Import frames locally to avoid circular imports at module load
-        from ui.frames.profile_management import ProfileManagementFrame
-        from ui.frames.create_edit_profile import CreateEditProfileFrame
+        from ui.frames.profileManagement import ProfileManagementFrame
+        from ui.frames.createEditProfile import CreateEditProfileFrame
         from ui.frames.training import BotTrainingFrame
-        from ui.frames.maze_builder import MazeBuilderFrame
+        from ui.frames.mazeBuilder import MazeBuilderFrame
         from ui.frames.visualization import VisualizationFrame
 
         self.frames: dict[str, Any] = {}

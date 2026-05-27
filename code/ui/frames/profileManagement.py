@@ -3,7 +3,7 @@ import tkinter as tk
 from tkinter import ttk
 from typing import Any
 
-from DisplayTools import DisplayTools
+from displayTools import DisplayTools
 
 
 class ProfileManagementFrame(tk.Frame):

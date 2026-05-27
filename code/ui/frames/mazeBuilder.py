@@ -2,7 +2,7 @@
 import json
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
-from Pathfinding import Pathfinding
+from pathfinding import Pathfinding
 
 
 class MazeBuilderFrame(tk.Frame):
@@ -208,7 +208,7 @@ class MazeBuilderFrame(tk.Frame):
 
     def generate_maze(self):
         try:
-            from Maze import Maze
+            from maze import Maze
             w = max(3, int(self.width_var.get()))
             h = max(3, int(self.height_var.get()))
             m = Maze(w, h)

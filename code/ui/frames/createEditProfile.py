@@ -3,9 +3,9 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from typing import Any, cast
 
-from BotConfigs import bot_configs, QLearningConfig
-from RewardSystem import RewardConfig
-from BotProfile import BotProfile
+from botConfigs import bot_configs, QLearningConfig
+from rewardSystem import RewardConfig
+from botProfile import BotProfile
 
 
 class CreateEditProfileFrame(tk.Frame):

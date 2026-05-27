@@ -1,7 +1,7 @@
-from BotFactory import BotFactory
-from Maze import Maze
-from BotStatistics import BotStatistics
-from BotProfile import BotProfile, ProfileManager
+from botFactory import BotFactory
+from maze import Maze
+from botStatistics import BotStatistics
+from botProfile import BotProfile, ProfileManager
 from typing import Any, Optional, cast
 import threading
 import time
@@ -88,7 +88,7 @@ class GameEnvironment:
         """
         Register available bots with the bot factory.
         """
-        from QLearningBot import QLearningBot  # Ensure QLearningBot is imported only when needed
+        from qLearningBot import QLearningBot  # Ensure QLearningBot is imported only when needed
         self.bot_factory.register_bot('QLearningBot', QLearningBot)
         # Register other bots as needed
         # self.bot_factory.register_bot('AnotherBot', AnotherBot)

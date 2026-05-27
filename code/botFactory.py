@@ -3,7 +3,7 @@ from __future__ import annotations
 import inspect
 from typing import Any, Protocol
 
-from RewardSystem import RewardSystem, MazeSensors
+from rewardSystem import RewardSystem, MazeSensors
 from services.repository import ArtifactsRepository
 
 

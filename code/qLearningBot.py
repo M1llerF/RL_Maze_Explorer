@@ -1,10 +1,10 @@
 import numpy as np
 from typing import Any, cast
 
-from BotStatistics import BotStatistics
-from BaseBot import BaseBot
-from BotTools import BotTools
-from BotConfigs import QLearningConfig
+from botStatistics import BotStatistics
+from baseBot import BaseBot
+from botTools import BotTools
+from botConfigs import QLearningConfig
 from services.repository import ArtifactsRepository
 from services.runners import QLearningEpisodeRunner
 

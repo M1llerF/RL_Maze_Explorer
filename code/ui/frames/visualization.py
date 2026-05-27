@@ -7,9 +7,9 @@ import matplotlib.colors as mcolors
 from matplotlib import pyplot as plt
 import numpy as np
 
-from DisplayTools import DisplayTools
-from RewardGrapher import RewardGrapher
-from VisualizationStrategy import QLearningBotVisualizationStrategy
+from displayTools import DisplayTools
+from rewardGrapher import RewardGrapher
+from visualizationStrategy import QLearningBotVisualizationStrategy
 
 
 class VisualizationWindow(tk.Toplevel):

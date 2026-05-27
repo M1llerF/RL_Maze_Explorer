@@ -10,13 +10,13 @@ CODE_DIR = os.path.join(ROOT, "code")
 if CODE_DIR not in sys.path:
     sys.path.insert(0, CODE_DIR)
 
-from BotConfigs import QLearningConfig, bot_configs
-from BotFactory import BotFactory
-from BotProfile import BotProfile, ProfileManager
-from BotStatistics import BotStatistics
-from QLearningBot import QLearning, QLearningBot
-from RewardSystem import RewardConfig
-from RewardSystem import RewardSystem
+from botConfigs import QLearningConfig, bot_configs
+from botFactory import BotFactory
+from botProfile import BotProfile, ProfileManager
+from botStatistics import BotStatistics
+from qLearningBot import QLearning, QLearningBot
+from rewardSystem import RewardConfig
+from rewardSystem import RewardSystem
 from services.runners import QLearningEpisodeRunner
 from services.repository import ArtifactsRepository
 

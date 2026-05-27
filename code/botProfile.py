@@ -5,9 +5,9 @@ import pickle
 import tempfile
 from typing import Any, cast
 
-from BotConfigs import build_config_for_bot_type
-from RewardSystem import RewardConfig
-from BotStatistics import BotStatistics
+from botConfigs import build_config_for_bot_type
+from rewardSystem import RewardConfig
+from botStatistics import BotStatistics
 
 
 

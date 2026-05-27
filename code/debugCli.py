@@ -4,9 +4,9 @@ import os
 from typing import Any, Dict, List, cast
 from services.repository import ArtifactsRepository
 
-from GameEnvironment import GameEnvironment
-from BotConfigs import QLearningConfig, bot_configs
-from RewardSystem import RewardConfig
+from gameEnvironment import GameEnvironment
+from botConfigs import QLearningConfig, bot_configs
+from rewardSystem import RewardConfig
 
 
 def _read_profile_stats(profile_name: str) -> Dict[str, Any]:

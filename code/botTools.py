@@ -1,4 +1,4 @@
-from Pathfinding import Pathfinding
+from pathfinding import Pathfinding
 import numpy as np
 from typing import Any, Tuple, List, Union, cast
 class BotTools:
