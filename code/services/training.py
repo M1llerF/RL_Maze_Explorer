@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import threading
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
-from BotProfile import BotProfile
-from GameEnvironment import GameEnvironment
+from gameEnvironment import GameEnvironment
 
 
 class TrainingController:
@@ -20,43 +19,43 @@ class TrainingController:
         self._thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
         self._lock = threading.Lock()
-        self._active_profile: Optional[str] = None
-        self._bot_index: Optional[int] = None
+        self._activeProfile: Optional[str] = None
+        self._botIndex: Optional[int] = None
 
     # Public API ------------------------------------------------------------
-    def is_active(self) -> bool:
+    def isActive(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
 
     @property
-    def active_profile(self) -> Optional[str]:
-        return self._active_profile
+    def activeProfile(self) -> Optional[str]:
+        return self._activeProfile
 
     def stop(self) -> None:
         """Cooperatively stop the current training run."""
         with self._lock:
-            if not self.is_active():
+            if not self.isActive():
                 return
             self._stop.set()
             # Ask bot to stop mid-episode if it supports it
             try:
-                prof = self._active_profile
+                prof = self._activeProfile
                 if prof:
                     for b in self._env.bots:
                         if getattr(b, 'profile_name', None) == prof and hasattr(b, 'request_stop'):
-                            b.request_stop()
+                            b.requestStop()
                             break
             except Exception:
                 pass
 
     def start(
         self,
-        profile_name: str,
+        profileName: str,
         rounds: int,
-        maze_mode: str = "Random",
-        pool_size: int = 20,
-        on_progress: Optional[Callable[[int, int], None]] = None,
-        on_error: Optional[Callable[[Exception], None]] = None,
-        on_complete: Optional[Callable[[], None]] = None,
+        mazeMode: str = "Random",
+        poolSize: int = 20,
+        onProgress: Optional[Callable[[int, int], None]] = None,
+        onError: Optional[Callable[[Exception], None]] = None,
+        onComplete: Optional[Callable[[], None]] = None,
     ) -> None:
         """
         Start a background training run for the given profile.
@@ -68,47 +67,47 @@ class TrainingController:
         - callbacks: invoked on main thread by caller (UI should .after(...) if needed)
         """
         with self._lock:
-            if self.is_active():
+            if self.isActive():
                 return
             self._stop.clear()
-            self._active_profile = profile_name
-            self._bot_index = None
+            self._activeProfile = profileName
+            self._botIndex = None
             # Configure maze source
             try:
-                if maze_mode == "Pool":
-                    self._env.configure_training_pool(size=int(pool_size))
-                elif maze_mode == "Fixed (Builder)":
+                if mazeMode == "Pool":
+                    self._env.configureTrainingPool(size=int(poolSize))
+                elif mazeMode == "Fixed (Builder)":
                     # Ensure a fixed maze is active; let UI pre-set it
-                    if not self._env.fixed_maze_active or self._env.fixed_maze_state is None:
+                    if not self._env.fixedMazeActive or self._env.fixedMazeState is None:
                         raise RuntimeError("Fixed maze is not configured.")
                     # Training pool must be off when fixed maze is used
-                    self._env.training_pool_active = False
+                    self._env.trainingPoolActive = False
                 else:
                     # Random each reset
-                    self._env.training_pool_active = False
-                    self._env.fixed_maze_active = False
-                    self._env.fixed_maze_state = None
+                    self._env.trainingPoolActive = False
+                    self._env.fixedMazeActive = False
+                    self._env.fixedMazeState = None
             except Exception as e:
-                if on_error:
-                    on_error(e)
+                if onError:
+                    onError(e)
                 return
 
             # Load/apply profile & prepare bot
             try:
-                profile = self._env.profile_manager.load_profile(profile_name)
-                self._bot_index = self._env.apply_profile(profile)
+                profile = self._env.profileManager.loadProfile(profileName)
+                self._botIndex = int(self._env.applyProfile(profile))
                 # Clear previous completed count
-                self._env.reset_completed(profile.name)
+                self._env.resetCompleted(profile.name)
                 # Clear stop flags on the bot if present
                 try:
-                    bot = self._env.bots[self._bot_index]
+                    bot = self._env.bots[self._botIndex]
                     if hasattr(bot, 'clear_stop'):
-                        bot.clear_stop()
+                        bot.clearStop()
                 except Exception:
                     pass
             except Exception as e:
-                if on_error:
-                    on_error(e)
+                if onError:
+                    onError(e)
                 return
 
             def _run():
@@ -118,12 +117,15 @@ class TrainingController:
                             break
                         # Run a single episode for the selected bot
                         try:
-                            bot = self._env.bots[self._bot_index]
+                            idx = self._botIndex
+                            if idx is None:
+                                raise RuntimeError("Bot index not set")
+                            bot: Any = self._env.bots[idx]
                         except Exception as exc:
                             raise RuntimeError("Bot not available") from exc
 
                         # If visualization is open for this profile, pause until resumed
-                        while self._env.is_training_paused(bot.profile_name):
+                        while self._env.isTrainingPaused(bot.profileName):
                             if self._stop.is_set():
                                 break
                             # Simple cooperative yield
@@ -131,26 +133,29 @@ class TrainingController:
                         if self._stop.is_set():
                             break
 
-                        bot.run_episode()
-                        self._env.reset_environment(self._bot_index)
-                        self._env.inc_completed(bot.profile_name)
-                        if on_progress:
+                        bot.runEpisode()
+                        idx2 = self._botIndex
+                        if idx2 is None:
+                            raise RuntimeError("Bot index not set")
+                        self._env.resetEnvironment(idx2)
+                        self._env.incCompleted(bot.profileName)
+                        if onProgress:
                             try:
-                                on_progress(i + 1, rounds)
+                                onProgress(i + 1, rounds)
                             except Exception:
                                 pass
                 except Exception as e:
-                    if on_error:
-                        on_error(e)
+                    if onError:
+                        onError(e)
                 finally:
                     with self._lock:
                         self._thread = None
                         self._stop.clear()
-                        self._active_profile = None
-                        self._bot_index = None
-                    if on_complete:
+                        self._activeProfile = None
+                        self._botIndex = None
+                    if onComplete:
                         try:
-                            on_complete()
+                            onComplete()
                         except Exception:
                             pass
 

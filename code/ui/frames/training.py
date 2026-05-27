@@ -2,38 +2,39 @@ import json
 import os
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
+from typing import Any
 
 
 class BotTrainingFrame(tk.Frame):
-    def __init__(self, parent, controller):
+    def __init__(self, parent: Any, controller: Any) -> None:
         super().__init__(parent)
         self.controller = controller
 
-        self.visualization_window = None
-        self.training_active = False
-        self.last_selected_profile = ""
-        self._log_interval = 1
-        self._log_last_round = 0
+        self.visualizationWindow = None
+        self.trainingActive = False
+        self.lastSelectedProfile = ""
+        self._logInterval = 1
+        self._logLastRound = 0
 
         ttk.Label(self, text="Bot Training", font=("TkDefaultFont", 20)).pack(pady=10, padx=10)
 
         ttk.Label(self, text="Select Profile:").pack()
-        self.profile_select = ttk.Combobox(self, state="readonly")
-        self.profile_select.pack()
+        self.profileSelect = ttk.Combobox(self, state="readonly")
+        self.profileSelect.pack()
 
         ttk.Label(self, text="Number of Rounds:").pack()
-        self.rounds_entry = ttk.Entry(self)
-        self.rounds_entry.pack()
+        self.roundsEntry = ttk.Entry(self)
+        self.roundsEntry.pack()
 
         ttk.Label(self, text="Maze Source:").pack(pady=(10, 0))
-        self.maze_mode = ttk.Combobox(self, values=["Random", "Fixed (Builder)", "Pool"], state="readonly")
-        self.maze_mode.set("Random")
-        self.maze_mode.pack()
+        self.mazeMode = ttk.Combobox(self, values=["Random", "Fixed (Builder)", "Pool"], state="readonly")
+        self.mazeMode.set("Random")
+        self.mazeMode.pack()
 
-        def on_maze_mode_change(event=None):
-            mode = self.maze_mode.get()
+        def onMazeModeChange(event: Any = None) -> None:
+            mode = self.mazeMode.get()
             if mode == "Fixed (Builder)":
-                if not self.controller.game_env.fixed_maze_active or self.controller.game_env.fixed_maze_state is None:
+                if not self.controller.gameEnv.fixedMazeActive or self.controller.gameEnv.fixedMazeState is None:
                     path = filedialog.askopenfilename(
                         title="Choose a maze JSON to use as Fixed",
                         initialdir='mazes',
@@ -43,99 +44,99 @@ class BotTrainingFrame(tk.Frame):
                         try:
                             with open(path, 'r') as f:
                                 state = json.load(f)
-                            self.controller.game_env.set_fixed_maze(state)
+                            self.controller.gameEnv.setFixedMaze(state)
                             messagebox.showinfo("Fixed Maze Set", f"Using {os.path.basename(path)} for training.")
                         except Exception as e:
                             messagebox.showerror("Invalid Maze", f"Could not load maze: {e}")
-                            self.maze_mode.set("Random")
+                            self.mazeMode.set("Random")
                     else:
-                        self.maze_mode.set("Random")
+                        self.mazeMode.set("Random")
 
-        self.maze_mode.bind("<<ComboboxSelected>>", on_maze_mode_change)
+        self.mazeMode.bind("<<ComboboxSelected>>", onMazeModeChange)
 
-        self.open_builder_btn = ttk.Button(self, text="Open Maze Builder", command=lambda: self.controller.show_maze_builder())
-        self.open_builder_btn.pack(pady=6)
+        self.openBuilderBtn = ttk.Button(self, text="Open Maze Builder", command=lambda: self.controller.showMazeBuilder())
+        self.openBuilderBtn.pack(pady=6)
 
         actions = ttk.Frame(self)
         actions.pack(pady=10)
-        self.start_btn = ttk.Button(actions, text="Start Training", command=self.start_training)
-        self.start_btn.pack(side=tk.LEFT, padx=6)
-        self.stop_btn = ttk.Button(actions, text="Stop", command=self.stop_training, state="disabled")
-        self.stop_btn.pack(side=tk.LEFT, padx=6)
-        self.training_progress = ttk.Progressbar(self, orient="horizontal", length=200, mode="determinate")
-        self.training_progress.pack(pady=10)
-        self.log_output = tk.Text(self, height=10, width=50)
-        self.log_output.pack(pady=10)
+        self.startBtn = ttk.Button(actions, text="Start Training", command=self.startTraining)
+        self.startBtn.pack(side=tk.LEFT, padx=6)
+        self.stopBtn = ttk.Button(actions, text="Stop", command=self.stopTraining, state="disabled")
+        self.stopBtn.pack(side=tk.LEFT, padx=6)
+        self.trainingProgress = ttk.Progressbar(self, orient="horizontal", length=200, mode="determinate")
+        self.trainingProgress.pack(pady=10)
+        self.logOutput = tk.Text(self, height=10, width=50)
+        self.logOutput.pack(pady=10)
 
-        ttk.Button(self, text="Open Visualization", command=self.open_visualization).pack(pady=10)
-        self.status_hint = tk.Label(self, text="", fg="#805b00")
-        self.status_hint.pack(pady=(0, 6))
+        ttk.Button(self, text="Open Visualization", command=self.openVisualization).pack(pady=10)
+        self.statusHint = tk.Label(self, text="", fg="#805b00")
+        self.statusHint.pack(pady=(0, 6))
 
-        self.load_profiles()
+        self.loadProfiles()
 
-    def on_show(self):
-        self.load_profiles()
+    def onShow(self) -> None:
+        self.loadProfiles()
 
-    def load_profiles(self):
-        profiles = self.controller.game_env.profile_manager.list_profiles()
-        self.profile_select['values'] = profiles
-        if self.last_selected_profile and self.last_selected_profile in profiles:
+    def loadProfiles(self) -> None:
+        profiles = self.controller.gameEnv.profileManager.listProfiles()
+        self.profileSelect['values'] = profiles
+        if self.lastSelectedProfile and self.lastSelectedProfile in profiles:
             try:
-                self.profile_select.set(self.last_selected_profile)
+                self.profileSelect.set(self.lastSelectedProfile)
             except Exception:
                 pass
 
-    def start_training(self):
-        if self.training_active:
+    def startTraining(self) -> None:
+        if self.trainingActive:
             return
-        selected_profile = self.profile_select.get()
-        if not selected_profile:
+        selectedProfile = self.profileSelect.get()
+        if not selectedProfile:
             messagebox.showerror("Error", "No profile selected.")
             return
 
-        rounds_txt = self.rounds_entry.get()
-        if not rounds_txt.isdigit():
+        roundsTxt = self.roundsEntry.get()
+        if not roundsTxt.isdigit():
             messagebox.showerror("Error", "Number of rounds must be a positive integer.")
             return
-        rounds = int(rounds_txt)
+        rounds = int(roundsTxt)
 
-        mode = self.maze_mode.get() or "Random"
+        mode = self.mazeMode.get() or "Random"
         if mode == "Fixed (Builder)":
-            if not self.controller.game_env.fixed_maze_active or self.controller.game_env.fixed_maze_state is None:
+            if not self.controller.gameEnv.fixedMazeActive or self.controller.gameEnv.fixedMazeState is None:
                 messagebox.showerror("No Fixed Maze", "No fixed maze set. Open Maze Builder to create or load one, then click 'Use In Training'.")
                 return
 
-        self.training_progress['maximum'] = rounds
-        self.training_progress['value'] = 0
-        self._log_interval = max(1, rounds // 100)
-        self._log_last_round = 0
-        self.log_output.delete("1.0", tk.END)
-        self.log_output.insert(tk.END, f"Training started for {selected_profile} with {rounds} rounds...\n")
-        self.last_selected_profile = selected_profile
-        self.set_controls_enabled(False)
-        self.training_active = True
+        self.trainingProgress['maximum'] = rounds
+        self.trainingProgress['value'] = 0
+        self._logInterval = max(1, rounds // 100)
+        self._logLastRound = 0
+        self.logOutput.delete("1.0", tk.END)
+        self.logOutput.insert(tk.END, f"Training started for {selectedProfile} with {rounds} rounds...\n")
+        self.lastSelectedProfile = selectedProfile
+        self.setControlsEnabled(False)
+        self.trainingActive = True
         try:
-            self.stop_btn.configure(state="normal")
+            self.stopBtn.configure(state="normal")
         except Exception:
             pass
 
-        def on_progress(done: int, total: int):
+        def onProgress(done: int, total: int):
             try:
-                self.controller.root.after(0, self.update_progress, done, total)
+                self.controller.root.after(0, self.updateProgress, done, total)
             except Exception:
                 pass
 
-        def on_error(err: Exception):
+        def onError(err: Exception) -> None:
             def _report():
                 try:
-                    self.log_output.insert(tk.END, f"Training error: {err}\n")
-                    self.log_output.see(tk.END)
+                    self.logOutput.insert(tk.END, f"Training error: {err}\n")
+                    self.logOutput.see(tk.END)
                 except Exception:
                     pass
-                self.training_active = False
-                self.set_controls_enabled(True)
+                self.trainingActive = False
+                self.setControlsEnabled(True)
                 try:
-                    self.stop_btn.configure(state="disabled")
+                    self.stopBtn.configure(state="disabled")
                 except Exception:
                     pass
             try:
@@ -143,12 +144,12 @@ class BotTrainingFrame(tk.Frame):
             except Exception:
                 pass
 
-        def on_complete():
+        def onComplete() -> None:
             def _done():
-                self.training_active = False
-                self.set_controls_enabled(True)
+                self.trainingActive = False
+                self.setControlsEnabled(True)
                 try:
-                    self.stop_btn.configure(state="disabled")
+                    self.stopBtn.configure(state="disabled")
                 except Exception:
                     pass
             try:
@@ -156,86 +157,87 @@ class BotTrainingFrame(tk.Frame):
             except Exception:
                 pass
 
-        pool_size = max(5, min(25, rounds // 10 or 5)) if mode == "Pool" else 0
-        self.controller.training_controller.start(
-            profile_name=selected_profile,
+        poolSize = max(5, min(25, rounds // 10 or 5)) if mode == "Pool" else 0
+        self.controller.trainingController.start(
+            profileName=selectedProfile,
             rounds=rounds,
-            maze_mode=mode,
-            pool_size=pool_size or 20,
-            on_progress=on_progress,
-            on_error=on_error,
-            on_complete=on_complete,
+            mazeMode=mode,
+            poolSize=poolSize or 20,
+            onProgress=onProgress,
+            onError=onError,
+            onComplete=onComplete,
         )
 
-    def set_controls_enabled(self, enabled: bool):
+    def setControlsEnabled(self, enabled: bool) -> None:
         state = "readonly" if enabled else "disabled"
-        entry_state = "normal" if enabled else "disabled"
+        entryState = "normal" if enabled else "disabled"
         try:
-            self.profile_select.configure(state=state)
+            self.profileSelect.configure(state=state)
         except Exception:
             pass
         try:
-            self.maze_mode.configure(state=state)
+            self.mazeMode.configure(state=state)
         except Exception:
             pass
         try:
-            self.rounds_entry.configure(state=entry_state)
+            self.roundsEntry.configure(state=entryState)
         except Exception:
             pass
         try:
-            self.open_builder_btn.configure(state=("normal" if enabled else "disabled"))
+            self.openBuilderBtn.configure(state=("normal" if enabled else "disabled"))
         except Exception:
             pass
 
-    def stop_training(self):
-        if not self.training_active:
+    def stopTraining(self) -> None:
+        if not self.trainingActive:
             return
         try:
-            self.stop_btn.configure(state="disabled")
+            self.stopBtn.configure(state="disabled")
         except Exception:
             pass
         try:
-            self.controller.training_controller.stop()
+            self.controller.trainingController.stop()
         except Exception:
             pass
 
-    def update_progress(self, completed_rounds, total_rounds):
-        self.training_progress['value'] = completed_rounds
+    def updateProgress(self, completedRounds: int, totalRounds: int) -> None:
+        self.trainingProgress['value'] = completedRounds
         if (
-            completed_rounds == total_rounds
-            or completed_rounds == 1
-            or completed_rounds - self._log_last_round >= self._log_interval
+            completedRounds == totalRounds
+            or completedRounds == 1
+            or completedRounds - self._logLastRound >= self._logInterval
         ):
-            self.log_output.insert(tk.END, f"Completed round {completed_rounds}/{total_rounds}\n")
-            self.log_output.see(tk.END)
-            self._log_last_round = completed_rounds
-        if completed_rounds == total_rounds:
-            self.log_output.insert(tk.END, "Training completed.\n")
-            self.log_output.see(tk.END)
-            self.training_active = False
-            self.set_controls_enabled(True)
+            self.logOutput.insert(tk.END, f"Completed round {completedRounds}/{totalRounds}\n")
+            self.logOutput.see(tk.END)
+            self._logLastRound = completedRounds
+        if completedRounds == totalRounds:
+            self.logOutput.insert(tk.END, "Training completed.\n")
+            self.logOutput.see(tk.END)
+            self.trainingActive = False
+            self.setControlsEnabled(True)
 
-    def cancel_training_poll(self):
+    def cancelTrainingPoll(self) -> None:
         return
 
-    def open_visualization(self):
+    def openVisualization(self) -> None:
         from ui.frames.visualization import VisualizationWindow
 
-        selected_profile = self.profile_select.get()
-        if not selected_profile:
+        selectedProfile = self.profileSelect.get()
+        if not selectedProfile:
             messagebox.showerror("Error", "No profile selected.")
             return
-        profile = self.controller.game_env.profile_manager.load_profile(selected_profile)
-        profile_index = self.controller.game_env.apply_profile(profile)
+        profile = self.controller.gameEnv.profileManager.loadProfile(selectedProfile)
+        profileIndex = self.controller.gameEnv.applyProfile(profile)
 
-        if getattr(self, 'visualization_window', None) and self.visualization_window.winfo_exists():
-            self.visualization_window.focus()
+        existingWindow = self.visualizationWindow
+        if existingWindow is not None and existingWindow.winfo_exists():
+            existingWindow.focus()
         else:
-            self.visualization_window = VisualizationWindow(self.controller.root, self.controller.game_env, selected_profile, profile_index)
+            self.visualizationWindow = VisualizationWindow(self.controller.root, self.controller.gameEnv, selectedProfile, profileIndex)
             try:
-                self.log_output.insert(tk.END, "Opened visualization. Training is PAUSED while the window is open.\n")
-                self.log_output.see(tk.END)
-                self.status_hint.configure(text="Note: Training is paused while visualization is open.")
+                self.logOutput.insert(tk.END, "Opened visualization. Training is PAUSED while the window is open.\n")
+                self.logOutput.see(tk.END)
+                self.statusHint.configure(text="Note: Training is paused while visualization is open.")
             except Exception:
                 pass
 

@@ -42,13 +42,13 @@ This project is a Maze AI Experiment that serves as an introduction to AI and re
 ## Project Structure
 
 - `code/ui/app.py`: Main application wiring (Tkinter UI + navigation)
-- `code/GameEnvironment.py`: Environment setup and training/maze orchestration
-- `code/QLearningBot.py`: Q-Learning agent and episode/visualization flows
-- `code/RewardSystem.py`: Reward shaping and event scoring logic
-- `code/BotProfile.py`: Profile model and persistence helpers
-- `code/BotConfigs.py`: Bot configuration classes and defaults
-- `code/VisualizationStrategy.py`: Visualization adapters per bot type
-- `code/DisplayTools.py`: Heatmap and UI utilities
+- `code/gameEnvironment.py`: Environment setup and training/maze orchestration
+- `code/qLearningBot.py`: Q-Learning agent and episode/visualization flows
+- `code/rewardSystem.py`: Reward shaping and event scoring logic
+- `code/botProfile.py`: Profile model and persistence helpers
+- `code/botConfigs.py`: Bot configuration classes and defaults
+- `code/visualizationStrategy.py`: Visualization adapters per bot type
+- `code/displayTools.py`: Heatmap and UI utilities
 - `code/services/`: Shared services (artifacts repository, runners, training controller)
 - `code/ui/frames/`: UI frames for profile management, training, builder, visualization
 - `profiles/`: Runtime artifacts (q_tables, rewards, mazes.json) per profile (git-ignored)
@@ -86,14 +86,31 @@ Live visualization is strictly inference-only across all bots. When the Visualiz
 Run a profile for N episodes without the GUI and print summary metrics:
 
 ```bash
-python code/DebugCLI.py --profile TEST --episodes 50 --save-json
+python code/debugCli.py --profile TEST --episodes 50 --save-json
 ```
 
 Use `--create` to create a profile first (QLearningBot only):
 
 ```bash
-python code/DebugCLI.py --profile TEST --create --episodes 10
+python code/debugCli.py --profile TEST --create --episodes 10
 ```
+
+## Type Checking
+
+Run strict typing checks with Pyright from the project virtual environment:
+
+```bash
+./.venv/Scripts/pyright.exe
+```
+
+If Pyright is not installed in the environment yet:
+
+```bash
+python -m pip install pyright
+./.venv/Scripts/pyright.exe
+```
+
+CI should use the same command (`.venv/Scripts/pyright.exe`) so local and CI reports stay aligned.
 
 ## Notes
 

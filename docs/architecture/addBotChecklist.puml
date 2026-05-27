@@ -1,0 +1,69 @@
+@startuml
+title Add New Bot - Concrete Integration Checklist
+skinparam defaultTextAlignment left
+skinparam activity {
+  BackgroundColor #F8F8F8
+  BorderColor #333333
+}
+
+start
+
+partition "1. Package + Config" {
+  :Create package\ncode/bots/<newbot>/\n- __init__.py\n- bot.py\n- config.py;
+  :In config.py define <NewBot>Config\nconstructor args must match BOT_SPEC params values\nfor profile loads because botConfigs.buildConfigForBotType()\nfilters raw profile dictionaries by __init__ signature;
+  :In config.py define BOT_SPEC dict:\n- "type": stable profile botType string\n- "class": <NewBot>Config class\n- "params": UI label -> config attribute\n- "rewards": reward key -> default numeric value;
+  note right
+    Consumed by:
+    - code/bots/__init__.py::discoverBotSpecs()
+    - code/botConfigs.py::botConfigs
+    - code/ui/frames/createEditProfile.py::updateBotConfigUi()
+  end note
+}
+
+partition "2. Runtime Contract" {
+  :In bot.py implement class <NewBot>(BaseBot);
+  :Constructor must accept the dependencies BotFactory can inject:\nmaze, config, statistics, profileName/profile_name,\nrewardSystem/reward_system, repository\nor accept **kwargs;
+  note right
+    code/botFactory.py::createBot() inspects the
+    bot constructor and passes only accepted names.
+    It always builds RewardSystem with MazeSensors
+    before instantiating the bot.
+  end note
+  :Implement required BaseBot methods:\n- reset(): restore episode position/statistics/state\n- calculateState(...): return algorithm state\n- runEpisode(): execute one training episode\n- onEpisodeStart(mode)\n- onEpisodeStep(mode, stepIndex)\n- onEpisodeEnd(mode, outcome);
+  :Implement profile persistence hooks if state is durable:\n- getBotSpecificData() -> dict\n- initializeSpecificData(data) reads profile payload\n- use repository for artifacts instead of open-coded paths;
+  if (Supports live visualization?) then (yes)
+    :Expose inference-only helpers used by VisualizationWindow:\n- beginVisualizationEpisode()\n- stepVisualization(maxSteps) -> bool\nDo not update durable learning state or write artifacts here;
+  else (no)
+    :VisualizationFrame will still load the profile,\nbut report panels do nothing unless a strategy or graceful fallback exists;
+  endif
+}
+
+partition "3. Discovery + Registration" {
+  :In __init__.py export:\n- BOT_TYPE = "<same string as BOT_SPEC type>"\n- BOT_CLASS = <NewBot>\n- BOT_SPEC from config.py\n- optional aliases for direct imports;
+  :GameEnvironment.__init__ calls registerBots();\nregisterBots() calls discoverBotClasses();\nBotFactory.registerBot(BOT_TYPE, BOT_CLASS)\nadds the type to the runtime registry;
+  :Profile creation/load path:\nCreateEditProfileFrame.saveProfile()\n-> GameEnvironment.setupNewProfile()\n-> ProfileManager.saveProfile()\n-> BotFactory.createBot() when the type is registered;
+}
+
+partition "4. UI Touchpoints" {
+  if (Only numeric config params and rewards?) then (yes)
+    :No custom profile control rendering required;\nBOT_SPEC params/rewards render automatically\nin CreateEditProfileFrame;
+    :Still update CreateEditProfileFrame.saveProfile()\nto construct <NewBot>Config;\ncurrent code otherwise falls back to QLearningConfig;
+  else (no)
+    :Update code/ui/frames/createEditProfile.py\nsave/load logic to construct <NewBot>Config\ninstead of falling back to QLearningConfig;
+  endif
+  if (Needs custom visualization panels?) then (yes)
+    :Add a VisualizationStrategy in code/visualizationStrategy.py\nand register it in VisualizationFrame.visualizationStrategies\nusing the BOT_TYPE string;
+  endif
+  if (Needs different training controls?) then (yes)
+    :Update code/ui/frames/training.py\nand/or services/training.py only if maze source,\nthreading, pause, or stop semantics change;
+  endif
+}
+
+partition "5. Verification" {
+  :Add/adjust tests in tests/testTypingRegressions.py:\n- BOT_SPEC discovery includes new type\n- BotFactory constructor filtering creates bot\n- profile serialization rebuilds config\n- training/visualization persistence rules hold;
+  :Run:\npython -m unittest discover -s tests -p "*test*.py"\npyright code tests;
+  :Regenerate docs/architecture/*.svg from *.puml\nwith tools/plantuml.jar if diagrams changed;
+}
+
+stop
+@enduml

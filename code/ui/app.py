@@ -1,7 +1,8 @@
 import os
 import tkinter as tk
+from typing import Any
 
-from GameEnvironment import GameEnvironment
+from gameEnvironment import GameEnvironment
 from services.training import TrainingController
 
 
@@ -24,36 +25,36 @@ class MazeAIApp:
         except Exception:
             pass
 
-        self.game_env = GameEnvironment()
-        self.training_controller = TrainingController(self.game_env)
+        self.gameEnv = GameEnvironment()
+        self.trainingController = TrainingController(self.gameEnv)
 
-        self.create_navigation_bar()
-        self.create_main_frames()
+        self.createNavigationBar()
+        self.createMainFrames()
         # Graceful shutdown handler to cancel pending timers
-        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+        self.root.protocol("WM_DELETE_WINDOW", self.onClose)
 
     # ----- UI building -----
-    def create_navigation_bar(self):
-        self.menu_bar = tk.Menu(self.root)
-        self.root.config(menu=self.menu_bar)
+    def createNavigationBar(self):
+        self.menuBar = tk.Menu(self.root)
+        self.root.config(menu=self.menuBar)
 
-        self.nav_menu = tk.Menu(self.menu_bar, tearoff=0)
-        self.menu_bar.add_cascade(label="Navigation", menu=self.nav_menu)
-        self.nav_menu.add_command(label="Profile Management", command=self.show_profile_management)
-        self.nav_menu.add_command(label="Bot Training", command=self.show_bot_training)
-        self.nav_menu.add_command(label="Maze Builder", command=self.show_maze_builder)
-        self.nav_menu.add_command(label="Visualizations", command=self.show_visualizations)
-        self.nav_menu.add_command(label="Exit", command=self.root.quit)
+        self.navMenu = tk.Menu(self.menuBar, tearoff=0)
+        self.menuBar.add_cascade(label="Navigation", menu=self.navMenu)
+        self.navMenu.add_command(label="Profile Management", command=self.showProfileManagement)
+        self.navMenu.add_command(label="Bot Training", command=self.showBotTraining)
+        self.navMenu.add_command(label="Maze Builder", command=self.showMazeBuilder)
+        self.navMenu.add_command(label="Visualizations", command=self.showVisualizations)
+        self.navMenu.add_command(label="Exit", command=self.root.quit)
 
-    def create_main_frames(self):
+    def createMainFrames(self):
         # Import frames locally to avoid circular imports at module load
-        from ui.frames.profile_management import ProfileManagementFrame
-        from ui.frames.create_edit_profile import CreateEditProfileFrame
+        from ui.frames.profileManagement import ProfileManagementFrame
+        from ui.frames.createEditProfile import CreateEditProfileFrame
         from ui.frames.training import BotTrainingFrame
-        from ui.frames.maze_builder import MazeBuilderFrame
+        from ui.frames.mazeBuilder import MazeBuilderFrame
         from ui.frames.visualization import VisualizationFrame
 
-        self.frames = {}
+        self.frames: dict[str, Any] = {}
         for F in (
             ProfileManagementFrame,
             CreateEditProfileFrame,
@@ -61,52 +62,52 @@ class MazeAIApp:
             MazeBuilderFrame,
             VisualizationFrame,
         ):
-            page_name = F.__name__
+            pageName = F.__name__
             frame = F(parent=self.root, controller=self)
-            self.frames[page_name] = frame
+            self.frames[pageName] = frame
             frame.grid(row=0, column=0, sticky="nsew")
 
         # Default screen
-        self.show_frame("ProfileManagementFrame")
+        self.showFrame("ProfileManagementFrame")
 
     # ----- Navigation helpers -----
-    def show_frame(self, page_name: str):
-        frame = self.frames[page_name]
+    def showFrame(self, pageName: str) -> None:
+        frame = self.frames[pageName]
         frame.tkraise()
         if hasattr(frame, 'on_show'):
             try:
-                frame.on_show()
+                frame.onShow()
             except Exception:
                 pass
 
-    def show_profile_management(self):
-        self.show_frame("ProfileManagementFrame")
+    def showProfileManagement(self) -> None:
+        self.showFrame("ProfileManagementFrame")
 
-    def show_create_edit_profile(self, profile=None):
+    def showCreateEditProfile(self, profile: Any = None) -> None:
         frame = self.frames["CreateEditProfileFrame"]
-        frame.load_profile(profile)
-        self.show_frame("CreateEditProfileFrame")
+        frame.loadProfile(profile)
+        self.showFrame("CreateEditProfileFrame")
 
-    def show_bot_training(self):
-        self.show_frame("BotTrainingFrame")
+    def showBotTraining(self) -> None:
+        self.showFrame("BotTrainingFrame")
 
-    def show_visualizations(self):
-        self.show_frame("VisualizationFrame")
+    def showVisualizations(self) -> None:
+        self.showFrame("VisualizationFrame")
 
-    def show_maze_builder(self):
-        self.show_frame("MazeBuilderFrame")
+    def showMazeBuilder(self) -> None:
+        self.showFrame("MazeBuilderFrame")
 
-    def on_close(self):
+    def onClose(self) -> None:
         # Attempt to cancel any legacy polling before destroying root
         try:
             bt = self.frames.get("BotTrainingFrame")
             if bt and hasattr(bt, 'cancel_training_poll'):
-                bt.cancel_training_poll()
+                bt.cancelTrainingPoll()
         except Exception:
             pass
         # Request training controller to stop background thread
         try:
-            self.training_controller.stop()
+            self.trainingController.stop()
         except Exception:
             pass
         # Proactively destroy Matplotlib Tk widgets to avoid Tk finalizer errors
@@ -114,8 +115,8 @@ class MazeAIApp:
             viz = self.frames.get("VisualizationFrame")
             if viz is not None and getattr(viz, 'canvas_agg', None):
                 try:
-                    widget = viz.canvas_agg.get_tk_widget()
-                    viz.canvas_agg = None
+                    widget = viz.canvasAgg.get_tk_widget()
+                    viz.canvasAgg = None
                     widget.destroy()
                 except Exception:
                     pass

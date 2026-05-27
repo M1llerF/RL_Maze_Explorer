@@ -1,91 +1,139 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 
+@dataclass
+class EpisodeRuntime:
+    optimalPath: list[tuple[int, int]]
+    optimalLength: int
+    stepLimit: int
+    steps: int = 0
+    timesHitWall: int = 0
+    outcome: str = "aborted"
+    bestDistance: int = 0
+
+
 class QLearningEpisodeRunner:
-    """Episode controller for QLearningBot (training episodes only)."""
+    """
+    Episode controller for QLearningBot (training episodes only).
+
+    Contract:
+    - Owns episode orchestration (start/step/end loop control).
+    - Delegates algorithm internals to the bot (policy/value updates).
+    - Triggers persistence through repository calls at episode end.
+    - Must not be used for visualization; visualization remains inference-only.
+    """
 
     def __init__(self, bot: Any):
         self.bot = bot
 
-    def run_episode(self) -> None:
+    def runEpisode(self) -> None:
+        bot = self.bot
+        bot.onEpisodeStart("training")
+        runtime = self._startEpisode()
+        try:
+            while bot.position != bot.maze.end:
+                if not self._runStep(runtime):
+                    break
+            if bot.position == bot.maze.end:
+                runtime.outcome = "goal_reached"
+            self._finalizeEpisode(runtime)
+        finally:
+            bot.onEpisodeEnd("training", runtime.outcome)
+
+    def _startEpisode(self) -> EpisodeRuntime:
+        bot = self.bot
+        tools = bot.tools
+        maze = bot.maze
+
+        optimalPath = tools.getOptimalPathInfo(maze.start, maze.end, output='path')
+        optimalLength = len(optimalPath)
+        areaBonus = int(0.5 * maze.width * maze.height)
+        stepLimit = min(5000, max(200, 12 * optimalLength + areaBonus)) if optimalLength > 0 else max(200, areaBonus)
+
+        bot.totalReward = 0
+        return EpisodeRuntime(
+            optimalPath=optimalPath,
+            optimalLength=optimalLength,
+            stepLimit=stepLimit,
+            bestDistance=self._manhattan(bot.position, maze.end),
+        )
+
+    def _runStep(self, runtime: EpisodeRuntime) -> bool:
         bot = self.bot
         tools = bot.tools
         maze = bot.maze
         stats = bot.statistics
-        rsys = bot.reward_system
-        ql = bot.q_learning
+        rsys = bot.rewardSystem
+        ql = bot.qLearning
 
-        optimal_path = tools.get_optimal_path_info(maze.start, maze.end, output='path')
-        optimal_length = len(optimal_path)
-        area_bonus = int(0.5 * maze.width * maze.height)
-        step_limit = (min(5000, max(200, 12 * optimal_length + area_bonus)) if optimal_length > 0 else max(200, area_bonus))
+        bot.onEpisodeStep("training", runtime.steps)
+        reward = 0
+        action = ql.chooseAction(bot.state, stats)
+        newPosition = tools.calculateNextPosition(bot.position, action)
+        stats.totalSteps = stats.timesRevisitedSquares + stats.nonRepeatingStepsTaken
 
-        def manhattan(a, b):
-            return abs(a[0] - b[0]) + abs(a[1] - b[1])
+        if not maze.isValidPosition(bot.profileName, newPosition[0], newPosition[1]):
+            reward += rsys.getReward(bot.position, newPosition, runtime.optimalPath, runtime.optimalLength, stats.getVisitedPositions())
+            newState = bot.calculateState()
+            ql.updateQValue(bot.state, action, reward, newState)
+            bot.totalReward += reward
+            runtime.timesHitWall += 1
+            ql.totalSteps += 1
+            return True
 
-        bot.total_reward = 0
-        best_distance = manhattan(bot.position, maze.end)
-        steps = 0
-        times_hit_wall = 0
+        stats.updateLastVisited(bot.position)
+        reward += rsys.getReward(bot.position, newPosition, runtime.optimalPath, runtime.optimalLength, stats.getVisitedPositions())
 
-        while bot.position != maze.end:
-            reward = 0
-            action = ql.choose_action(bot.state, stats)
-            new_position = tools.calculate_next_position(bot.position, action)
-            stats.total_steps = stats.times_revisited_squares + stats.non_repeating_steps_taken
+        if newPosition in stats.getVisitedPositions():
+            stats.timesRevisitedSquares += 1
+        else:
+            stats.nonRepeatingStepsTaken += 1
 
-            if not maze.is_valid_position(bot.profile_name, new_position[0], new_position[1]):
-                reward += rsys.get_reward(bot.position, new_position, optimal_path, optimal_length, stats.get_visited_positions())
-                new_state = bot.calculate_state()
-                ql.update_q_value(bot.state, action, reward, new_state)
-                bot.total_reward += reward
-                times_hit_wall += 1
-                ql.total_steps += 1
-                continue
+        if stats.totalSteps > runtime.stepLimit:
+            reward += -100
+            newState = bot.calculateState()
+            ql.updateQValue(bot.state, action, reward, newState)
+            bot.totalReward += reward
+            runtime.outcome = "step_limit_statistics"
+            return False
 
-            stats.update_last_visited(bot.position)
-            reward += rsys.get_reward(bot.position, new_position, optimal_path, optimal_length, stats.get_visited_positions())
+        bot.totalReward += reward
+        newState = bot.calculateState(newPosition)
+        ql.updateQValue(bot.state, action, reward, newState)
+        ql.totalSteps += 1
 
-            if new_position in stats.get_visited_positions():
-                stats.times_revisited_squares += 1
-            else:
-                stats.non_repeating_steps_taken += 1
+        bot.position = newPosition
+        stats.updateVisitedPositions(bot.position)
+        bot.state = newState
+        runtime.steps += 1
 
-            if stats.total_steps > step_limit:
-                reward += -100
-                new_state = bot.calculate_state()
-                ql.update_q_value(bot.state, action, reward, new_state)
-                bot.total_reward += reward
-                break
+        currentDistance = self._manhattan(bot.position, maze.end)
+        if currentDistance < runtime.bestDistance:
+            runtime.bestDistance = currentDistance
+        if runtime.steps > runtime.stepLimit:
+            runtime.outcome = "step_limit_loop"
+            return False
+        return True
 
-            bot.total_reward += reward
-            new_state = bot.calculate_state(new_position)
-            ql.update_q_value(bot.state, action, reward, new_state)
-            ql.total_steps += 1
-
-            bot.position = new_position
-            stats.update_visited_positions(bot.position)
-            bot.state = new_state
-            steps += 1
-
-            current_distance = manhattan(bot.position, maze.end)
-            if current_distance < best_distance:
-                best_distance = current_distance
-            if steps > step_limit:
-                break
-
-        heatmap_data = stats.get_visited_positions()
+    def _finalizeEpisode(self, runtime: EpisodeRuntime) -> None:
+        bot = self.bot
+        maze = bot.maze
+        heatmapData = bot.statistics.getVisitedPositions()
         try:
-            bot.repo.save_maze_episode(bot.profile_name, maze, heatmap_data, bot.total_reward)
-            bot.repo.update_steps_from_heatmap(bot.profile_name, heatmap_data)
-            if times_hit_wall:
-                bot.repo.increment_times_hit_wall(bot.profile_name, times_hit_wall)
+            bot.repo.saveMazeEpisode(bot.profileName, maze, heatmapData, bot.totalReward)
+            bot.repo.updateStepsFromHeatmap(bot.profileName, heatmapData)
+            if runtime.timesHitWall:
+                bot.repo.incrementTimesHitWall(bot.profileName, runtime.timesHitWall)
         except Exception:
             pass
-        bot.repo.append_reward(bot.profile_name, bot.total_reward)
+        bot.repo.appendReward(bot.profileName, bot.totalReward)
+        bot.episodeCounter += 1
+        bot.qLearning.saveQTable()
 
-        bot.episode_counter += 1
-        ql.save_q_table()
+    @staticmethod
+    def _manhattan(a: tuple[int, int], b: tuple[int, int]) -> int:
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
 

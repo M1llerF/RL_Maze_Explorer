@@ -6,9 +6,9 @@ import pickle
 class PKLReader:
     def __init__(self, filepath):
         self.filepath = filepath
-        self.data = self.load_data()
+        self.data = self.loadData()
 
-    def load_data(self):
+    def loadData(self):
         """Load data from a pickle file."""
         try:
             with open(self.filepath, 'rb') as file:
@@ -21,39 +21,39 @@ class PKLReader:
             print(f"Error loading file: {e}")
             return None
 
-    def format_data(self, data=None, indent=0):
+    def formatData(self, data=None, indent=0):
         """Format the loaded data for pretty printing."""
         if data is None:
             data = self.data
 
         if isinstance(data, dict):
-            formatted_data = ""
+            formattedData = ""
             for key, value in data.items():
-                formatted_data += " " * indent + f"{key}:\n"
-                formatted_data += self.format_data(value, indent + 2)
-            return formatted_data
+                formattedData += " " * indent + f"{key}:\n"
+                formattedData += self.formatData(value, indent + 2)
+            return formattedData
         elif isinstance(data, list):
-            formatted_data = ""
+            formattedData = ""
             for item in data:
-                formatted_data += " " * indent + "- "
-                formatted_data += self.format_data(item, indent + 2).strip() + "\n"
-            return formatted_data
+                formattedData += " " * indent + "- "
+                formattedData += self.formatData(item, indent + 2).strip() + "\n"
+            return formattedData
         elif isinstance(data, tuple):
-            formatted_data = "("
-            formatted_data += ", ".join(self.format_data(item, 0).strip() for item in data)
-            formatted_data += ")\n"
-            return formatted_data
+            formattedData = "("
+            formattedData += ", ".join(self.formatData(item, 0).strip() for item in data)
+            formattedData += ")\n"
+            return formattedData
         else:
             return " " * indent + str(data) + "\n"
 
-    def display_data(self):
+    def displayData(self):
         """Print the formatted data."""
         if self.data is not None:
-            print(self.format_data())
+            print(self.formatData())
         else:
             print("No data to display.")
 
 if __name__ == "__main__":
     # Adjust path to a profile.pkl you want to inspect
     reader = PKLReader('profiles/QLearningBot/profile.pkl')
-    reader.display_data()
+    reader.displayData()

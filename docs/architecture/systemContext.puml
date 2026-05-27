@@ -1,0 +1,70 @@
+@startuml
+title RL Maze Explorer - System Context And Data Boundaries
+skinparam packageStyle rectangle
+skinparam componentStyle rectangle
+skinparam defaultTextAlignment center
+
+actor User
+
+rectangle "Desktop App" {
+  component "Tkinter UI\ncode/ui/app.py\ncode/ui/frames/*\nprofile forms, training controls,\nreports, live visualization" as UI
+  component "TrainingController\ncode/services/training.py\nbackground training thread,\nstop checks between episodes,\ncallbacks" as TC
+  component "GameEnvironment\ncode/gameEnvironment.py\nshared maze, bot registry,\nprofile application, reset policy" as GE
+}
+
+rectangle "Core Services" {
+  component "BotFactory\ncode/botFactory.py\nRewardSystem creation,\nconstructor kwarg filtering" as BF
+  component "Repository\ncode/services/repository.py\natomic artifact reads/writes" as Repo
+  component "Maze + Reward Engine\ncode/maze.py\ncode/rewardSystem.py\nstate, sensors, rewards" as Core
+  component "Bot/Profile Config\ncode/bots/__init__.py\ncode/botConfigs.py\nBOT_SPEC discovery,\nconfig rebuilding" as Config
+}
+
+rectangle "Bot Implementations" {
+  component "BaseBot Contract\ncode/baseBot.py\nreset/calculateState/runEpisode\nlifecycle hooks" as Base
+  component "QLearning Bot\ncode/bots/qlearning/*\nQLearningBot + QLearningConfig\nBOT_TYPE/BOT_CLASS/BOT_SPEC" as QL
+  component "Future Bots\ncode/bots/<newbot>/*\nsame exports and runtime contract" as FB
+}
+
+database "profiles/<profile>/" as Profiles {
+  [profile.pkl\nbotType, config,\nrewardConfig, statistics]
+  [q_table.pkl\nq_table.checksum]
+  [mazes.json\nlatest/highest/lowest\nheatmap snapshots]
+  [SimulationRewards.txt\none reward per episode]
+  [artifacts/*\nfuture model files]
+}
+
+folder "mazes/*.json\nbuilder/fixed-maze files" as Mazes
+
+User --> UI : create/edit profile,\ntrain, visualize, build mazes
+UI --> Config : list bot types,\nrender BOT_SPEC params/rewards
+UI --> GE : load/apply profiles,\npause visualization,\nset fixed maze
+UI --> TC : start(profile, rounds,\nmazeMode, callbacks)
+TC --> GE : profileManager.loadProfile(),\napplyProfile(), run bot episode,\nresetEnvironment(), completed count
+GE --> BF : createBot(botType,\nconfig, rewards, stats, data)
+GE --> Config : discoverBotClasses()\nat startup registration
+BF --> QL : instantiate registered type
+BF --> FB : instantiate future registered type
+BF --> Core : create RewardSystem\nwith MazeSensors
+QL -up-|> Base
+FB -up-|> Base
+QL --> Repo : Q-table and training artifacts
+FB --> Repo : optional modelArtifactsDir()\nor custom artifacts
+GE --> Repo : shared repository,\nensureMazeFile()
+Repo --> Profiles : persistent profile state
+GE --> Core : maze reset/state,\nreward dependencies
+UI --> Mazes : load/save fixed custom mazes
+Core --> Mazes : setState()/getState() data shape
+
+note bottom of UI
+  BOT_SPEC currently renders profile controls, but saveProfile()
+  only constructs QLearningConfig unless custom save logic is added.
+  Specialized controls also belong in CreateEditProfileFrame and/or
+  VisualizationFrame.
+end note
+
+note bottom of Repo
+  Training writes are centralized here.
+  Visualization should stay inference-only and avoid durable writes.
+end note
+
+@enduml

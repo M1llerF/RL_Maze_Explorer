@@ -1,0 +1,105 @@
+@startuml
+title Training Sequence - From UI Click To Persisted QLearning Artifacts
+autonumber
+skinparam defaultTextAlignment center
+
+actor User
+participant "BotTrainingFrame\ncode/ui/frames/training.py" as BTF
+participant "TrainingController\ncode/services/training.py" as TC
+participant "ProfileManager\ncode/botProfile.py" as PM
+participant "GameEnvironment\ncode/gameEnvironment.py" as GE
+participant "BotFactory\ncode/botFactory.py" as BF
+participant "QLearningBot\ncode/bots/qlearning/bot.py" as BOT
+participant "QLearningEpisodeRunner\ncode/services/runners.py" as RUN
+participant "RewardSystem\ncode/rewardSystem.py" as RS
+database "ArtifactsRepository\ncode/services/repository.py" as REPO
+
+User -> BTF: click Start Training
+BTF -> BTF: validate selected profile,\nround count, maze mode
+alt mazeMode == "Pool"
+  BTF -> TC: start(profileName, rounds,\nmazeMode="Pool", poolSize, callbacks)
+  TC -> GE: configureTrainingPool(size)
+else mazeMode == "Fixed (Builder)"
+  BTF -> GE: fixedMazeActive/fixedMazeState already set
+  BTF -> TC: start(profileName, rounds,\nmazeMode="Fixed (Builder)", callbacks)
+else mazeMode == "Random"
+  BTF -> TC: start(profileName, rounds,\nmazeMode="Random", callbacks)
+end
+
+TC -> PM: self._env.profileManager.loadProfile(profileName)
+PM --> TC: BotProfile(botType, config,\nrewardConfig, statistics, botSpecificData)
+TC -> GE: applyProfile(profile)
+alt bot for profile does not exist
+  GE -> BF: createBot(botType, profileName,\nconfig, rewardConfig, statistics, botSpecificData)
+  BF -> RS: RewardSystem(maze, rewardConfig,\nsensors=MazeSensors(maze))
+  BF -> BOT: __init__(maze, config, rewardSystem,\nstatistics, profileName, repository)
+  BOT -> REPO: loadQTable(profileName)
+  BF -> BOT: initializeSpecificData(botSpecificData)
+  BF --> GE: bot instance
+  GE -> GE: append to self.bots
+else bot already exists
+  GE -> BOT: replace config/statistics/profile data
+end
+GE --> TC: botIndex
+TC -> GE: resetCompleted(profileName)
+TC -> TC: start daemon Thread(target=_run)
+
+loop each requested episode
+  TC -> GE: isTrainingPaused(bot.profileName)?
+  alt not paused and not stopped
+    TC -> BOT: runEpisode()
+    BOT -> RUN: runEpisode()
+    RUN -> BOT: onEpisodeStart("training")
+    RUN -> RUN: _startEpisode()\ncompute optimalPath, optimalLength,\nstepLimit, bestDistance
+    loop while bot.position != maze.end and under limits
+      RUN -> BOT: onEpisodeStep("training", runtime.steps)
+      RUN -> BOT: qLearning.chooseAction(bot.state, statistics)
+      RUN -> BOT: tools.calculateNextPosition(position, action)
+      RUN -> RS: getReward(oldPosition, newPosition,\noptimalPath, optimalLength, visited)
+      alt invalid move / wall
+        RUN -> BOT: calculateState()
+        RUN -> BOT: qLearning.updateQValue(state, action, reward, sameState)
+        RUN -> RUN: timesHitWall++, qLearning.totalSteps++
+      else valid move
+        RUN -> BOT: calculateState(newPosition)
+        RUN -> BOT: qLearning.updateQValue(state, action, reward, newState)
+        RUN -> BOT: update position, state,\nstatistics visited counters
+      end
+    end
+    alt goal reached
+      RUN -> RUN: outcome = "goal_reached"
+    else step limit hit
+      RUN -> RUN: outcome = "step_limit_statistics"\nor "step_limit_loop"
+    end
+    RUN -> REPO: saveMazeEpisode(profile, maze,\nheatmapData, totalReward)\n-> profiles/<name>/mazes.json
+    RUN -> REPO: updateStepsFromHeatmap(profile, heatmapData)\n-> profile.pkl counters
+    opt wall hits during episode
+      RUN -> REPO: incrementTimesHitWall(profile, count)\n-> profile.pkl
+    end
+    RUN -> REPO: appendReward(profile, totalReward)\n-> SimulationRewards.txt
+    RUN -> BOT: qLearning.saveQTable()
+    BOT -> REPO: saveQTable(profile, qTable)\n-> q_table.pkl + q_table.checksum
+    RUN -> BOT: onEpisodeEnd("training", outcome)
+    TC -> GE: resetEnvironment(botIndex)\nrandom/fixed/pool maze policy
+    TC -> GE: incCompleted(profileName)
+    TC -> BTF: onProgress(done, rounds)
+  else paused/stopped
+    TC -> TC: wait 50ms while paused\nor break before next episode
+  end
+end
+TC -> BTF: onComplete() or onError(exception)
+
+note over BOT,RUN
+  VisualizationWindow uses bot.stepVisualization(maxSteps)
+  instead of this runner. That path is inference-only:
+  no Q-value updates and no repository writes.
+end note
+
+note over TC,BOT
+  TrainingController.stop() sets an Event that is checked before each
+  episode and while paused. The current requestStop/clearStop attribute
+  checks use snake_case names, so they do not reach QLearningBot's
+  camelCase hooks during an in-flight episode.
+end note
+
+@enduml
