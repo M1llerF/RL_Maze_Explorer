@@ -15,6 +15,8 @@ class BotTrainingFrame(tk.Frame):
         self.lastSelectedProfile = ""
         self._logInterval = 1
         self._logLastRound = 0
+        self._stepPollAfterId: str | None = None
+        self._lastWarmupState: bool | None = None
 
         ttk.Label(self, text="Bot Training", font=("TkDefaultFont", 20)).pack(pady=10, padx=10)
 
@@ -65,6 +67,8 @@ class BotTrainingFrame(tk.Frame):
         self.stopBtn.pack(side=tk.LEFT, padx=6)
         self.trainingProgress = ttk.Progressbar(self, orient="horizontal", length=200, mode="determinate")
         self.trainingProgress.pack(pady=10)
+        self.stepCounterLabel = ttk.Label(self, text="Episode Steps: 0")
+        self.stepCounterLabel.pack()
         self.logOutput = tk.Text(self, height=10, width=50)
         self.logOutput.pack(pady=10)
 
@@ -113,8 +117,11 @@ class BotTrainingFrame(tk.Frame):
         self.logOutput.delete("1.0", tk.END)
         self.logOutput.insert(tk.END, f"Training started for {selectedProfile} with {rounds} rounds...\n")
         self.lastSelectedProfile = selectedProfile
+        self._lastWarmupState = None
+        self.stepCounterLabel.configure(text="Episode Steps: 0")
         self.setControlsEnabled(False)
         self.trainingActive = True
+        self._startStepPoll()
         try:
             self.stopBtn.configure(state="normal")
         except Exception:
@@ -135,6 +142,9 @@ class BotTrainingFrame(tk.Frame):
                     pass
                 self.trainingActive = False
                 self.setControlsEnabled(True)
+                self._stopStepPoll()
+                self._lastWarmupState = None
+                self.stepCounterLabel.configure(text="Episode Steps: 0")
                 try:
                     self.stopBtn.configure(state="disabled")
                 except Exception:
@@ -148,6 +158,9 @@ class BotTrainingFrame(tk.Frame):
             def _done():
                 self.trainingActive = False
                 self.setControlsEnabled(True)
+                self._stopStepPoll()
+                self._lastWarmupState = None
+                self.stepCounterLabel.configure(text="Episode Steps: 0")
                 try:
                     self.stopBtn.configure(state="disabled")
                 except Exception:
@@ -199,6 +212,9 @@ class BotTrainingFrame(tk.Frame):
             self.controller.trainingController.stop()
         except Exception:
             pass
+        self._stopStepPoll()
+        self._lastWarmupState = None
+        self.stepCounterLabel.configure(text="Episode Steps: 0")
 
     def updateProgress(self, completedRounds: int, totalRounds: int) -> None:
         self.trainingProgress['value'] = completedRounds
@@ -215,9 +231,67 @@ class BotTrainingFrame(tk.Frame):
             self.logOutput.see(tk.END)
             self.trainingActive = False
             self.setControlsEnabled(True)
+            self._stopStepPoll()
+            self._lastWarmupState = None
+            self.stepCounterLabel.configure(text="Episode Steps: 0")
 
     def cancelTrainingPoll(self) -> None:
-        return
+        self._stopStepPoll()
+
+    def _startStepPoll(self) -> None:
+        self._stopStepPoll()
+        self._pollCurrentEpisodeSteps()
+
+    def _stopStepPoll(self) -> None:
+        if self._stepPollAfterId is not None:
+            try:
+                self.after_cancel(self._stepPollAfterId)
+            except Exception:
+                pass
+            self._stepPollAfterId = None
+
+    def _pollCurrentEpisodeSteps(self) -> None:
+        if not self.trainingActive:
+            self.stepCounterLabel.configure(text="Episode Steps: 0")
+            self._stepPollAfterId = None
+            return
+        steps = 0
+        try:
+            profile = self.controller.trainingController.activeProfile or self.profileSelect.get()
+            if profile:
+                bot = next((b for b in self.controller.gameEnv.bots if getattr(b, "profileName", "") == profile), None)
+                if bot is not None:
+                    steps = int(getattr(bot, "currentEpisodeSteps", 0))
+                    self._updateWarmupLog(bot)
+        except Exception:
+            steps = 0
+        self.stepCounterLabel.configure(text=f"Episode Steps: {steps}")
+        self._stepPollAfterId = self.after(150, self._pollCurrentEpisodeSteps)
+
+    def _updateWarmupLog(self, bot: Any) -> None:
+        warmupActive = False
+        try:
+            config = getattr(bot, "config", None)
+            agent = getattr(bot, "agent", None)
+            if config is not None and agent is not None:
+                warmupEnabled = bool(getattr(config, "warmupEnabled", False))
+                replayWarmupSteps = int(getattr(config, "replayWarmupSteps", 0))
+                replaySize = len(getattr(agent, "replay", []))
+                warmupActive = warmupEnabled and replaySize < replayWarmupSteps
+        except Exception:
+            warmupActive = False
+
+        if self._lastWarmupState is None:
+            self._lastWarmupState = warmupActive
+            if warmupActive:
+                self.logOutput.insert(tk.END, "Warmup entered.\n")
+                self.logOutput.see(tk.END)
+            return
+
+        if warmupActive != self._lastWarmupState:
+            self._lastWarmupState = warmupActive
+            self.logOutput.insert(tk.END, "Warmup entered.\n" if warmupActive else "Warmup completed.\n")
+            self.logOutput.see(tk.END)
 
     def openVisualization(self) -> None:
         from ui.frames.visualization import VisualizationWindow
@@ -240,4 +314,3 @@ class BotTrainingFrame(tk.Frame):
                 self.statusHint.configure(text="Note: Training is paused while visualization is open.")
             except Exception:
                 pass
-

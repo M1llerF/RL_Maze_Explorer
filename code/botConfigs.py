@@ -26,6 +26,14 @@ def buildConfigForBotType(botType: str | None, rawConfig: Any) -> Any:
         return rawConfig
 
     cfgDict = cast(dict[str, Any], rawConfig) if isinstance(rawConfig, dict) else {}
+    if isinstance(cfgDict, dict):
+        fromProfile = getattr(configCls, "from_profile_dict", None)
+        if callable(fromProfile):
+            try:
+                return fromProfile(cfgDict)
+            except Exception:
+                pass
+
     try:
         signature = inspect.signature(configCls)
         allowed: set[str] = {
@@ -48,7 +56,7 @@ def buildConfigForBotType(botType: str | None, rawConfig: Any) -> Any:
                 camel = parts[0] + "".join(p[:1].upper() + p[1:] for p in parts[1:])
                 normalized.setdefault(camel, v)
 
-    kwargs = {k: v for k, v in normalized.items() if k in allowed}
+    kwargs = {k: v for k, v in normalized.items() if k in allowed and v is not None}
     try:
         return configCls(**kwargs)
     except TypeError:

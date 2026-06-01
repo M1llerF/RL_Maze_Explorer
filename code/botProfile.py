@@ -68,6 +68,23 @@ class BotProfile:
         return out
 
     @staticmethod
+    def _camelToSnake(name: str) -> str:
+        out: list[str] = []
+        for i, ch in enumerate(name):
+            if ch.isupper() and i > 0 and (not name[i - 1].isupper()):
+                out.append("_")
+            out.append(ch.lower())
+        return "".join(out)
+
+    @staticmethod
+    def _legacyKeyNormalized(d: dict[str, Any]) -> dict[str, Any]:
+        out = BotProfile._legacySnakeToCamel(d)
+        for key, value in d.items():
+            snake = BotProfile._camelToSnake(str(key))
+            out.setdefault(snake, value)
+        return out
+
+    @staticmethod
     def fromDict(data: Any, defaultName: str | None = None) -> BotProfile:
         """
         Create a BotProfile instance from a dictionary.
@@ -91,7 +108,7 @@ class BotProfile:
         # Reward config
         rewardConfig = d.get('reward_config')
         if isinstance(rewardConfig, dict):
-            rewardConfig = RewardConfig(**BotProfile._legacySnakeToCamel(cast(dict[str, Any], rewardConfig)))
+            rewardConfig = RewardConfig(**BotProfile._legacyKeyNormalized(cast(dict[str, Any], rewardConfig)))
         elif not isinstance(rewardConfig, RewardConfig):
             rewardConfig = RewardConfig()
 
@@ -100,7 +117,7 @@ class BotProfile:
         if isinstance(statistics, dict):
             s = BotStatistics()
             try:
-                s.__dict__.update(BotProfile._legacySnakeToCamel(cast(dict[str, Any], statistics)))
+                s.__dict__.update(BotProfile._legacyKeyNormalized(cast(dict[str, Any], statistics)))
             except Exception:
                 pass
             statistics = s

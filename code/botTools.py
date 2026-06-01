@@ -149,4 +149,37 @@ class BotTools:
             return len(optimalPath)
         else:
             raise ValueError("Output parameter must be 'path' or 'length'")
-        
+
+    def getDynamicPathInfo(
+        self,
+        start: Tuple[int, int],
+        end: Tuple[int, int],
+        knownWalls: set[Tuple[int, int]] | None = None,
+        output: str = 'path',
+    ) -> Union[List[Tuple[int, int]], int]:
+        dynamicPath = Pathfinding.dStarLiteSearch(self.maze, start, end, knownWalls=set(knownWalls or set()))
+        if output == 'path':
+            return dynamicPath
+        elif output == 'length':
+            return len(dynamicPath)
+        else:
+            raise ValueError("Output parameter must be 'path' or 'length'")
+
+    def getDynamicWarmupActions(
+        self,
+        start: Tuple[int, int],
+        end: Tuple[int, int],
+        maxSteps: int | None = None,
+        knownOpen: set[Tuple[int, int]] | None = None,
+        knownWalls: set[Tuple[int, int]] | None = None,
+        seenGoals: set[Tuple[int, int]] | None = None,
+    ) -> List[int]:
+        return Pathfinding.dStarLiteFrontierWarmupActions(
+            self.maze,
+            start,
+            end,
+            maxSteps=maxSteps,
+            knownOpen=knownOpen,
+            knownWalls=knownWalls,
+            seenGoals=seenGoals,
+        )

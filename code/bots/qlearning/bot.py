@@ -112,6 +112,7 @@ class QLearningBot(BaseBot):
         self.profileName = profileName
         self.totalReward = 0
         self.episodeCounter = 0
+        self.currentEpisodeSteps = 0
         self.position = maze.getStart()
         self.state = self.calculateState()
         self.qLearning.loadQTable()  # Load Q-table when initializing
@@ -167,6 +168,7 @@ class QLearningBot(BaseBot):
         self.position = self.maze.start
         self.statistics.reset()
         self.totalReward = 0
+        self.currentEpisodeSteps = 0
         self.state = self.calculateState()
 
     # Training lifecycle hooks (explicit contract implementation)

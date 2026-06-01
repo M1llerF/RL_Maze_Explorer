@@ -65,3 +65,4 @@ profiles/*
 mazes/*
 !mazes/.gitkeep
 tools/
+code/DQN_Mixed/*

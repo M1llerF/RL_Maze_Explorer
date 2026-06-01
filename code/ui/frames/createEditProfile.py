@@ -3,7 +3,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from typing import Any, cast
 
-from botConfigs import botConfigs, QLearningConfig
+from botConfigs import botConfigs, buildConfigForBotType
 from rewardSystem import RewardConfig
 from botProfile import BotProfile
 
@@ -12,12 +12,12 @@ class CreateEditProfileFrame(tk.Frame):
     def __init__(self, parent: Any, controller: Any) -> None:
         super().__init__(parent)
         self.controller = controller
-        self.currentConfigWidgets = []
-        self.paramVars = {}
-        self.rewardVars = {}
-        self.autoVars = {}
-        self.paramEntries = {}
-        self.rewardEntries = {}
+        self.currentConfigWidgets: list[Any] = []
+        self.paramVars: dict[str, tk.StringVar] = {}
+        self.rewardVars: dict[str, tk.StringVar] = {}
+        self.autoVars: dict[str, Any] = {}
+        self.paramEntries: dict[str, Any] = {}
+        self.rewardEntries: dict[str, Any] = {}
         self.profile: BotProfile | None = None
         try:
             self._style = ttk.Style()
@@ -26,6 +26,11 @@ class CreateEditProfileFrame(tk.Frame):
             self._style = None
 
         ttk.Label(self, text="Create/Edit Profile", font=("TkDefaultFont", 20)).pack(pady=10, padx=10)
+
+        buttonRow = ttk.Frame(self)
+        buttonRow.pack(pady=6)
+        ttk.Button(buttonRow, text="Save", command=self.saveProfile).pack(side=tk.LEFT, padx=6)
+        ttk.Button(buttonRow, text="Cancel", command=self.cancel).pack(side=tk.LEFT, padx=6)
 
         ttk.Label(self, text="Profile Name:").pack()
         self.profileNameEntry = ttk.Entry(self)
@@ -37,10 +42,41 @@ class CreateEditProfileFrame(tk.Frame):
         self.botTypeEntry.bind("<<ComboboxSelected>>", self.updateBotConfigUi)
 
         self.configFrame = ttk.Frame(self)
-        self.configFrame.pack(pady=10)
+        self.configFrame.pack(fill="both", expand=True, pady=10)
 
-        ttk.Button(self, text="Save", command=self.saveProfile).pack(pady=10)
-        ttk.Button(self, text="Cancel", command=self.cancel).pack(pady=10)
+    def _targetTab(self, paramKey: str, tabs: dict[str, Any]) -> Any:
+        key = str(paramKey)
+        if key in {"useRichEncoding", "usePositionInState", "neuralMapWidth", "neuralMapHeight", "neuralMapPoolSize"}:
+            return tabs["encoding"]
+        if key in {
+            "warmupEnabled",
+            "replayWarmupSteps",
+            "immediateReversalPenalty",
+            "repeatVisitPenaltyScale",
+            "noProgressPenalty",
+            "noProgressPatienceFactor",
+            "minNoProgressSteps",
+            "maxNoProgressSteps",
+        }:
+            return tabs["warmup"]
+        if key in {
+            "learningRate",
+            "discountFactor",
+            "epsilonStart",
+            "epsilonEnd",
+            "epsilonDecaySteps",
+            "replayCapacity",
+            "batchSize",
+            "trainFrequency",
+            "targetUpdateFrequency",
+            "hiddenSize",
+            "maxStepsPerEpisode",
+            "rewardClipMin",
+            "rewardClipMax",
+            "diagnosticsFrequency",
+        }:
+            return tabs["core"]
+        return tabs["general"]
 
     # ----- UI building -----
     def updateBotConfigUi(self, event: Any = None) -> None:
@@ -51,38 +87,56 @@ class CreateEditProfileFrame(tk.Frame):
         self.rewardVars.clear()
         self.autoVars.clear()
         self.paramEntries.clear()
+        self.rewardEntries.clear()
 
         botType = self.botTypeEntry.get()
         if botType not in botConfigs:
             return
         config = botConfigs[botType]
 
-        # Parameters
+        notebook = ttk.Notebook(self.configFrame)
+        notebook.pack(fill="both", expand=True, padx=8, pady=8)
+        tabs = {
+            "general": ttk.Frame(notebook),
+            "core": ttk.Frame(notebook),
+            "encoding": ttk.Frame(notebook),
+            "warmup": ttk.Frame(notebook),
+            "rewards": ttk.Frame(notebook),
+        }
+        notebook.add(tabs["general"], text="General")
+        notebook.add(tabs["core"], text="DQN Core")
+        notebook.add(tabs["encoding"], text="Encoding")
+        notebook.add(tabs["warmup"], text="Warmup/Planner")
+        notebook.add(tabs["rewards"], text="Rewards")
+        self.currentConfigWidgets.extend([notebook, *tabs.values()])
+
         if "params" in config:
             for paramName, paramKey in config["params"].items():
-                row = ttk.Frame(self.configFrame)
-                row.pack(fill="x", pady=2)
+                host = self._targetTab(paramKey, tabs)
+                row = ttk.Frame(host)
+                row.pack(fill="x", pady=2, padx=8)
                 label = ttk.Label(row, text=f"{paramName}:")
                 label.pack(side=tk.LEFT)
                 var = tk.StringVar()
-                entry = ttk.Entry(row, textvariable=var, width=12)
+                entry = ttk.Entry(row, textvariable=var, width=14)
                 entry.pack(side=tk.LEFT, padx=6)
                 self.currentConfigWidgets.extend([row, label, entry])
                 self.paramVars[paramKey] = var
                 self.paramEntries[paramKey] = entry
 
-        # Rewards
         if "rewards" in config:
-            label = ttk.Label(self.configFrame, text="Reward Configuration:")
-            label.pack()
-            self.currentConfigWidgets.append(label)
+            header = ttk.Label(tabs["rewards"], text="Reward Configuration:")
+            header.pack(anchor="w", padx=8, pady=(2, 6))
+            self.currentConfigWidgets.append(header)
             for rewardKey, defaultValue in config["rewards"].items():
-                rewardLabel = ttk.Label(self.configFrame, text=rewardKey)
-                rewardLabel.pack()
+                row = ttk.Frame(tabs["rewards"])
+                row.pack(fill="x", padx=8, pady=2)
+                rewardLabel = ttk.Label(row, text=f"{rewardKey}:")
+                rewardLabel.pack(side=tk.LEFT)
                 var = tk.StringVar(value=defaultValue)
-                rewardEntry = ttk.Entry(self.configFrame, textvariable=var)
-                rewardEntry.pack()
-                self.currentConfigWidgets.extend([rewardLabel, rewardEntry])
+                rewardEntry = ttk.Entry(row, textvariable=var, width=14)
+                rewardEntry.pack(side=tk.LEFT, padx=6)
+                self.currentConfigWidgets.extend([row, rewardLabel, rewardEntry])
                 self.rewardVars[rewardKey] = var
                 self.rewardEntries[rewardKey] = rewardEntry
 
@@ -98,7 +152,6 @@ class CreateEditProfileFrame(tk.Frame):
             if profile.config:
                 for paramKey, var in self.paramVars.items():
                     var.set(getattr(profile.config, paramKey, ""))
-            # No algorithm-specific auto flags
 
             if profile.rewardConfig:
                 for rewardKey, var in self.rewardVars.items():
@@ -138,8 +191,8 @@ class CreateEditProfileFrame(tk.Frame):
             except Exception:
                 pass
 
-        botParams = {}
-        paramErrors = []
+        botParams: dict[str, float | None] = {}
+        paramErrors: list[str] = []
         for paramKey, var in self.paramVars.items():
             txt = (var.get() or "").strip()
             if txt == "":
@@ -150,8 +203,8 @@ class CreateEditProfileFrame(tk.Frame):
             except Exception:
                 paramErrors.append(paramKey)
 
-        rewardsConfig = {}
-        rewardErrors = []
+        rewardsConfig: dict[str, float] = {}
+        rewardErrors: list[str] = []
         for rewardKey, var in self.rewardVars.items():
             txt = (var.get() or "").strip()
             try:
@@ -174,8 +227,10 @@ class CreateEditProfileFrame(tk.Frame):
                         e.configure(style="Error.TEntry")
                     except Exception:
                         pass
-            def _format(keys, label):
+
+            def _format(keys: list[str], label: str) -> str:
                 return (label + ":\n  - " + "\n  - ".join(keys)) if keys else ""
+
             msg = "\n\n".join(filter(None, [
                 _format(paramErrors, "Invalid parameters"),
                 _format(rewardErrors, "Invalid rewards"),
@@ -183,15 +238,8 @@ class CreateEditProfileFrame(tk.Frame):
             messagebox.showerror("Invalid Values", msg + "\n\nPlease fix these fields and try saving again.")
             return
 
-        if botType == "QLearningBot":
-            qDefaults = QLearningConfig()
-            botConfig = QLearningConfig(
-                learningRate=cast(float, botParams.get('learning_rate') if botParams.get('learning_rate') is not None else qDefaults.learningRate),
-                discountFactor=cast(float, botParams.get('discount_factor') if botParams.get('discount_factor') is not None else qDefaults.discountFactor),
-                usePositionInState=bool(getattr(qDefaults, 'use_position_in_state', True))
-            )
-        else:
-            botConfig = QLearningConfig()
+        rawConfig = {k: v for k, v in botParams.items() if v is not None}
+        botConfig = buildConfigForBotType(botType, rawConfig)
 
         rewardConfigObj = RewardConfig()
         rewardConfigObj.rewardModifiers.update(rewardsConfig)
@@ -203,13 +251,11 @@ class CreateEditProfileFrame(tk.Frame):
             return
 
         try:
-            # Initialize default mazes.json via repository
             self.controller.gameEnv.repository.ensureMazeFile(profileName)
         except Exception:
             pass
 
         messagebox.showinfo("Profile Saved", "Profile has been saved.")
-
         self.controller.frames["ProfileManagementFrame"].loadProfiles()
         self.controller.frames["VisualizationFrame"].loadProfiles()
         self.controller.frames["BotTrainingFrame"].loadProfiles()
