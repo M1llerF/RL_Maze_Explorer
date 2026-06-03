@@ -1,11 +1,12 @@
 # pyright: reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownParameterType=false, reportMissingParameterType=false
 import tkinter as tk
 from tkinter import ttk, messagebox
-from typing import Any, cast
+from typing import Any
 
 from botConfigs import botConfigs, buildConfigForBotType
 from rewardSystem import RewardConfig
 from botProfile import BotProfile
+from ui.scrollable import VerticalScrolledFrame
 
 
 class CreateEditProfileFrame(tk.Frame):
@@ -25,23 +26,27 @@ class CreateEditProfileFrame(tk.Frame):
         except Exception:
             self._style = None
 
-        ttk.Label(self, text="Create/Edit Profile", font=("TkDefaultFont", 20)).pack(pady=10, padx=10)
+        scrollHost = VerticalScrolledFrame(self)
+        scrollHost.pack(fill=tk.BOTH, expand=True)
+        content = scrollHost.content
 
-        buttonRow = ttk.Frame(self)
+        ttk.Label(content, text="Create/Edit Profile", font=("TkDefaultFont", 20)).pack(pady=10, padx=10)
+
+        buttonRow = ttk.Frame(content)
         buttonRow.pack(pady=6)
         ttk.Button(buttonRow, text="Save", command=self.saveProfile).pack(side=tk.LEFT, padx=6)
         ttk.Button(buttonRow, text="Cancel", command=self.cancel).pack(side=tk.LEFT, padx=6)
 
-        ttk.Label(self, text="Profile Name:").pack()
-        self.profileNameEntry = ttk.Entry(self)
+        ttk.Label(content, text="Profile Name:").pack()
+        self.profileNameEntry = ttk.Entry(content)
         self.profileNameEntry.pack()
 
-        ttk.Label(self, text="Bot Type:").pack()
-        self.botTypeEntry = ttk.Combobox(self, values=list(botConfigs.keys()))
+        ttk.Label(content, text="Bot Type:").pack()
+        self.botTypeEntry = ttk.Combobox(content, values=list(botConfigs.keys()))
         self.botTypeEntry.pack()
         self.botTypeEntry.bind("<<ComboboxSelected>>", self.updateBotConfigUi)
 
-        self.configFrame = ttk.Frame(self)
+        self.configFrame = ttk.Frame(content)
         self.configFrame.pack(fill="both", expand=True, pady=10)
 
     def _targetTab(self, paramKey: str, tabs: dict[str, Any]) -> Any:
@@ -49,7 +54,6 @@ class CreateEditProfileFrame(tk.Frame):
         if key in {"useRichEncoding", "usePositionInState", "neuralMapWidth", "neuralMapHeight", "neuralMapPoolSize"}:
             return tabs["encoding"]
         if key in {
-            "warmupEnabled",
             "replayWarmupSteps",
             "immediateReversalPenalty",
             "repeatVisitPenaltyScale",
@@ -242,7 +246,7 @@ class CreateEditProfileFrame(tk.Frame):
         botConfig = buildConfigForBotType(botType, rawConfig)
 
         rewardConfigObj = RewardConfig()
-        rewardConfigObj.rewardModifiers.update(rewardsConfig)
+        rewardConfigObj.rewardModifiers.update({k: str(v) for k, v in rewardsConfig.items()})
 
         try:
             self.controller.gameEnv.setupNewProfile(profileName, botType, botConfig, rewardConfigObj)

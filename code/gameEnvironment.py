@@ -42,6 +42,8 @@ class GameEnvironment:
         # Optional fixed custom maze (overrides random/pool when active)
         self.fixedMazeActive: bool = False
         self.fixedMazeState: Optional[dict[str, Any]] = None
+        # Curriculum control (enabled for random training runs by controller)
+        self.curriculumActive: bool = False
 
     # ----- Fixed custom maze controls ----
     def setFixedMaze(self, state: dict[str, Any]) -> None:
@@ -142,6 +144,21 @@ class GameEnvironment:
         self.trainingPoolActive = True
         # Pool overrides any fixed maze selection
         self.fixedMazeActive = False
+        self.curriculumActive = False
+
+    def getMazeSize(self) -> tuple[int, int]:
+        return int(self.maze.width), int(self.maze.height)
+
+    def setMazeSize(self, width: int, height: int) -> None:
+        """
+        Set maze dimensions for subsequent resets and regenerate immediately.
+        Intended for curriculum progression.
+        """
+        self.maze.resize(int(width), int(height), regenerate=True)
+        # Curriculum-controlled random mode should not use pool/fixed snapshots.
+        self.trainingPoolActive = False
+        self.fixedMazeActive = False
+        self.fixedMazeState = None
 
     def resetEnvironment(self, botIndex: int) -> None:
         """
@@ -185,7 +202,7 @@ class GameEnvironment:
         profile = self.profileManager.loadProfile(profileName)
         self.applyProfile(profile)
 
-    def applyProfile(self, profile: BotProfile) -> int:
+    def applyProfile(self, profile: BotProfile, loadCheckpoint: bool = True) -> int:
         """
         Apply a loaded profile to the environment.
 
@@ -194,24 +211,22 @@ class GameEnvironment:
         """
         # Check if a bot with the same profile name already exists
         botIndex = next((i for i, bot in enumerate(self.bots) if bot.profileName == profile.name), -1)
+        bot = self.botFactory.createBot(
+            profile.botType,
+            profile.name,
+            profile.config,
+            profile.rewardConfig,
+            profile.statistics,
+            profile.botSpecificData,
+            loadCheckpoint=loadCheckpoint,
+        )
         if botIndex == -1:
             # If the bot does not exist, create a new one and append it
-            bot = self.botFactory.createBot(
-                profile.botType,
-                profile.name,
-                profile.config,
-                profile.rewardConfig,
-                profile.statistics,
-                profile.botSpecificData
-            )
             self.bots.append(bot)
             botIndex = len(self.bots) - 1
         else:
-            bot = self.bots[botIndex]
-            bot.config = profile.config
-            bot.rewardConfig = profile.rewardConfig
-            bot.statistics = profile.statistics
-            bot.botSpecificData = profile.botSpecificData
+            # Replace in-place so callers keeping bot indices remain valid.
+            self.bots[botIndex] = bot
 
         return botIndex
 

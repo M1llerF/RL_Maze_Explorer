@@ -68,11 +68,17 @@ class DQNConfig:
     minNoProgressSteps: int = 50
     maxNoProgressSteps: int = 1000
     diagnosticsFrequency: int = 0
-    rewardClipMin: float = -1.0
-    rewardClipMax: float = 1.0
-    stateEncodingVersion: int = 2
-    warmupEnabled: bool = True
-
+    rewardClipMin: float = -10.0
+    rewardClipMax: float = 10.0
+    stateEncodingVersion: int = 4
+    mapEmbedDim: int = 128
+    checkpointFrequency: int = 10
+    # Step-budget formula: min(stepLimitMax, max(stepLimitMin, stepLimitStepCoeff * optimalLen + stepLimitAreaCoeff * w * h))
+    stepLimitStepCoeff: int = 12
+    stepLimitAreaCoeff: float = 0.5
+    stepLimitMax: int = 5000
+    stepLimitMin: int = 200
+    stepLimitPenalty: float = -100.0
     @classmethod
     def from_profile_dict(cls, profile: dict[str, Any]) -> DQNConfig:
         if not isinstance(profile, dict):
@@ -92,7 +98,8 @@ class DQNConfig:
             epsilonEnd=_as_float(raw.get("epsilonEnd", cls.epsilonEnd), "epsilonEnd"),
             epsilonDecaySteps=_as_int(raw.get("epsilonDecaySteps", cls.epsilonDecaySteps), "epsilonDecaySteps", 1),
             replayCapacity=_as_int(raw.get("replayCapacity", cls.replayCapacity), "replayCapacity", 1),
-            replayWarmupSteps=_as_int(raw.get("replayWarmupSteps", cls.replayWarmupSteps), "replayWarmupSteps", 0),
+            # Warmup transition target is shared behavior, not a per-profile knob.
+            replayWarmupSteps=cls.replayWarmupSteps,
             batchSize=_as_int(raw.get("batchSize", cls.batchSize), "batchSize", 1),
             trainFrequency=_as_int(raw.get("trainFrequency", cls.trainFrequency), "trainFrequency", 1),
             targetUpdateFrequency=_as_int(raw.get("targetUpdateFrequency", cls.targetUpdateFrequency), "targetUpdateFrequency", 1),
@@ -112,8 +119,19 @@ class DQNConfig:
             diagnosticsFrequency=_as_int(raw.get("diagnosticsFrequency", cls.diagnosticsFrequency), "diagnosticsFrequency", 0),
             rewardClipMin=_as_float(raw.get("rewardClipMin", cls.rewardClipMin), "rewardClipMin"),
             rewardClipMax=_as_float(raw.get("rewardClipMax", cls.rewardClipMax), "rewardClipMax"),
-            stateEncodingVersion=_as_int(raw.get("stateEncodingVersion", cls.stateEncodingVersion), "stateEncodingVersion", 1),
-            warmupEnabled=_as_bool(raw.get("warmupEnabled", cls.warmupEnabled), "warmupEnabled"),
+            # Promote older profiles to the current encoder schema so
+            # size-dependent legacy checkpoints/warmup stores are invalidated.
+            stateEncodingVersion=max(
+                cls.stateEncodingVersion,
+                _as_int(raw.get("stateEncodingVersion", cls.stateEncodingVersion), "stateEncodingVersion", 1),
+            ),
+            mapEmbedDim=_as_int(raw.get("mapEmbedDim", cls.mapEmbedDim), "mapEmbedDim", 0),
+            checkpointFrequency=_as_int(raw.get("checkpointFrequency", cls.checkpointFrequency), "checkpointFrequency", 0),
+            stepLimitStepCoeff=_as_int(raw.get("stepLimitStepCoeff", cls.stepLimitStepCoeff), "stepLimitStepCoeff", 1),
+            stepLimitAreaCoeff=_as_float(raw.get("stepLimitAreaCoeff", cls.stepLimitAreaCoeff), "stepLimitAreaCoeff"),
+            stepLimitMax=_as_int(raw.get("stepLimitMax", cls.stepLimitMax), "stepLimitMax", 1),
+            stepLimitMin=_as_int(raw.get("stepLimitMin", cls.stepLimitMin), "stepLimitMin", 1),
+            stepLimitPenalty=_as_float(raw.get("stepLimitPenalty", cls.stepLimitPenalty), "stepLimitPenalty"),
         )
         config._validate_ranges()
         return config
@@ -137,46 +155,3 @@ class DQNConfig:
             raise ConfigValidationError("maxNoProgressSteps must be >= minNoProgressSteps")
 
 
-BOT_SPEC: dict[str, Any] = {
-    "type": "DQNBot",
-    "class": DQNConfig,
-    "params": {
-        "Learning Rate": "learningRate",
-        "Discount Factor": "discountFactor",
-        "Epsilon Start": "epsilonStart",
-        "Epsilon End": "epsilonEnd",
-        "Epsilon Decay Steps": "epsilonDecaySteps",
-        "Replay Capacity": "replayCapacity",
-        "Replay Warmup Steps": "replayWarmupSteps",
-        "Batch Size": "batchSize",
-        "Train Frequency": "trainFrequency",
-        "Target Update Frequency": "targetUpdateFrequency",
-        "Hidden Size": "hiddenSize",
-        "Max Steps Per Episode": "maxStepsPerEpisode",
-        "Use Rich Encoding (0/1)": "useRichEncoding",
-        "Use Position In State (0/1)": "usePositionInState",
-        "Warmup Enabled (0/1)": "warmupEnabled",
-        "Neural Map Width": "neuralMapWidth",
-        "Neural Map Height": "neuralMapHeight",
-        "Neural Map Pool Size": "neuralMapPoolSize",
-        "Immediate Reversal Penalty": "immediateReversalPenalty",
-        "Repeat Visit Penalty Scale": "repeatVisitPenaltyScale",
-        "No Progress Penalty": "noProgressPenalty",
-        "No Progress Patience Factor": "noProgressPatienceFactor",
-        "Min No Progress Steps": "minNoProgressSteps",
-        "Max No Progress Steps": "maxNoProgressSteps",
-        "Reward Clip Min": "rewardClipMin",
-        "Reward Clip Max": "rewardClipMax",
-        "Diagnostics Frequency": "diagnosticsFrequency",
-    },
-    "rewards": {
-        "goal_reached": 1000,
-        "hit_wall": -100,
-        "revisit_optimal_path": -10,
-        "revisit_non_optimal_path": -15,
-        "move_in_optimal_path": 5,
-        "see_goal_new_location": 50,
-        "see_goal_revisit": 5,
-        "per_move_penalty": -1,
-    },
-}

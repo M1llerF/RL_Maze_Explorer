@@ -33,13 +33,24 @@ class DqnAgent:
         inputDim: int,
         replay: ReplayStore | None = None,
         numActions: int = 4,
+        flatDim: int | None = None,
+        mapShape: tuple[int, int, int] | None = None,
     ) -> None:
         self.config = config
         self.inputDim = int(inputDim)
         self.numActions = int(numActions)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.policy = DqnModel(self.inputDim, self.config.hiddenSize, self.numActions).to(self.device)
-        self.target = DqnModel(self.inputDim, self.config.hiddenSize, self.numActions).to(self.device)
+        resolvedFlatDim = int(flatDim) if flatDim is not None else self.inputDim
+        mapEmbedDim = int(getattr(config, "mapEmbedDim", 0)) if mapShape is not None else 0
+        modelKwargs = dict(
+            flatDim=resolvedFlatDim,
+            hiddenSize=self.config.hiddenSize,
+            numActions=self.numActions,
+            mapShape=mapShape,
+            mapEmbedDim=mapEmbedDim,
+        )
+        self.policy = DqnModel(**modelKwargs).to(self.device)
+        self.target = DqnModel(**modelKwargs).to(self.device)
         self.target.load_state_dict(self.policy.state_dict())
         self.target.eval()
         self.optimizer = Adam(self.policy.parameters(), lr=self.config.learningRate)
@@ -51,6 +62,7 @@ class DqnAgent:
         self.randomFallbackCount = 0
         self.warmupCompletionStep: int | None = None
         self.lastLoss: float | None = None
+        self.manualEpsilonOverride: float | None = None
 
     def chooseAction(self, encodedState: EncodedState, training: bool) -> int:
         validActions = np.flatnonzero(encodedState.validActionMask).tolist()
@@ -58,7 +70,7 @@ class DqnAgent:
             validActions = [0, 1, 2, 3]
         if training and random.random() < self._epsilon():
             return int(random.choice(validActions))
-        with torch.no_grad():
+        with torch.inference_mode():
             stateTensor = torch.as_tensor(encodedState.values, dtype=torch.float32, device=self.device).unsqueeze(0)
             qValues = self.policy(stateTensor)
             mask = torch.as_tensor(encodedState.validActionMask, dtype=torch.bool, device=self.device).unsqueeze(0)
@@ -70,7 +82,11 @@ class DqnAgent:
         if plannerAction is not None and 0 <= plannerAction <= 3 and bool(valid[plannerAction]):
             self.plannerActionCount += 1
             return int(plannerAction)
-        raise RuntimeError("Warmup planner action is invalid for the current action mask.")
+        validActions = np.flatnonzero(valid).tolist()
+        if not validActions:
+            validActions = [0, 1, 2, 3]
+        self.randomFallbackCount += 1
+        return int(random.choice(validActions))
 
     def storeTransition(self, transition: Transition) -> None:
         self.replay.push(transition)
@@ -106,6 +122,8 @@ class DqnAgent:
         )
 
     def _epsilon(self) -> float:
+        if self.manualEpsilonOverride is not None:
+            return float(self.manualEpsilonOverride)
         decaySteps = max(1, int(self.config.epsilonDecaySteps))
         progress = min(1.0, float(self.globalStep) / float(decaySteps))
         return max(
@@ -113,6 +131,15 @@ class DqnAgent:
             float(self.config.epsilonStart)
             + (float(self.config.epsilonEnd) - float(self.config.epsilonStart)) * progress,
         )
+
+    def setManualEpsilon(self, value: float | None) -> None:
+        if value is None:
+            self.manualEpsilonOverride = None
+            return
+        epsilon = float(value)
+        if epsilon < 0.0 or epsilon > 1.0:
+            raise ValueError("Manual epsilon must be between 0.0 and 1.0.")
+        self.manualEpsilonOverride = epsilon
 
     def _optimize(self, batch: DqnTrainingBatch) -> float:
         states = torch.as_tensor(batch.states, dtype=torch.float32, device=self.device)

@@ -47,6 +47,7 @@ class BotFactory:
         rewardConfig: Any,
         statistics: Any,
         botSpecificData: dict[str, Any],
+        loadCheckpoint: bool = True,
     ) -> Any:
         """
         Create a instance of the specified bot type.
@@ -81,6 +82,7 @@ class BotFactory:
             "profileName": profileName,
             "profile_name": profileName,
             "repository": self.repository,
+            "loadCheckpoint": loadCheckpoint,
         }
         signature = inspect.signature(botClass)
         acceptsKwargs = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in signature.parameters.values())

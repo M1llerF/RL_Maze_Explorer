@@ -123,6 +123,9 @@ class QLearningEpisodeRunner:
 
     def _finalizeEpisode(self, runtime: EpisodeRuntime) -> None:
         bot = self.bot
+        bot.lastEpisodeSuccess = runtime.outcome == "goal_reached"
+        bot.lastEpisodeSteps = int(runtime.steps)
+        bot.lastEpisodeOptimalSteps = int(runtime.optimalLength)
         maze = bot.maze
         heatmapData = bot.statistics.getVisitedPositions()
         try:
@@ -179,13 +182,18 @@ class DQNEpisodeRunner:
         optimalPathRaw = bot.tools.getOptimalPathInfo(bot.maze.start, bot.maze.end, output="path")
         optimalPath = optimalPathRaw if isinstance(optimalPathRaw, list) else []
         optimalLength = len(optimalPath)
-        areaBonus = int(0.5 * bot.maze.width * bot.maze.height)
-        dynamicLimit = min(5000, max(200, 12 * optimalLength + areaBonus)) if optimalLength > 0 else max(200, areaBonus)
-        stepLimit = min(dynamicLimit, int(bot.config.maxStepsPerEpisode))
-        dynamicPatience = int(max(1, optimalLength) * float(bot.config.noProgressPatienceFactor))
+        cfg = bot.config
+        areaBonus = int(float(cfg.stepLimitAreaCoeff) * bot.maze.width * bot.maze.height)
+        dynamicLimit = (
+            min(int(cfg.stepLimitMax), max(int(cfg.stepLimitMin), int(cfg.stepLimitStepCoeff) * optimalLength + areaBonus))
+            if optimalLength > 0
+            else max(int(cfg.stepLimitMin), areaBonus)
+        )
+        stepLimit = min(dynamicLimit, int(cfg.maxStepsPerEpisode))
+        dynamicPatience = int(max(1, optimalLength) * float(cfg.noProgressPatienceFactor))
         progressPatience = min(
             stepLimit,
-            max(int(bot.config.minNoProgressSteps), min(int(bot.config.maxNoProgressSteps), dynamicPatience)),
+            max(int(cfg.minNoProgressSteps), min(int(cfg.maxNoProgressSteps), dynamicPatience)),
         )
         bot.reset()
         bot.currentEpisodeSteps = 0
@@ -203,6 +211,8 @@ class DQNEpisodeRunner:
         bot.onEpisodeStep("training", runtime.steps)
         encodedState = bot.encodeState()
         action = bot.chooseAction(encodedState, training=True)
+
+        # Capture pre-step state for reward computation before applyStep updates visited.
         attempted = bot.tools.calculateNextPosition(bot.position, action)
         reward = float(
             bot.rewardSystem.getReward(
@@ -213,36 +223,25 @@ class DQNEpisodeRunner:
                 stats.getVisitedPositions(),
             )
         )
+
+        hitWall, wasRevisit, wasReversal, nextStateRaw = bot.applyStep(action)
         done = False
-        if not bot.maze.isValidPosition(bot.profileName, attempted[0], attempted[1]):
+        if hitWall:
             runtime.timesHitWall += 1
-            runtime.steps += 1
-            bot.currentEpisodeSteps = int(runtime.steps)
-            bot._rememberWall(attempted)
-            nextStateRaw = bot.calculateState()
         else:
-            stats.updateLastVisited(bot.position)
-            if attempted in stats.getVisitedPositions():
-                stats.timesRevisitedSquares += 1
-                reward -= float(bot.config.repeatVisitPenaltyScale)
+            reward += bot.shapingPenalty(wasRevisit, wasReversal)
+            if wasRevisit:
+                runtime.noProgressSteps += 1
             else:
-                stats.nonRepeatingStepsTaken += 1
                 runtime.noProgressSteps = 0
-            if bot.previousPosition is not None and attempted == bot.previousPosition:
-                reward += float(bot.config.immediateReversalPenalty)
-            bot.previousPosition = bot.position
-            bot.position = attempted
-            stats.updateVisitedPositions(bot.position)
-            bot._observePosition(bot.position)
-            runtime.steps += 1
-            bot.currentEpisodeSteps = int(runtime.steps)
-            runtime.noProgressSteps += 1
-            nextStateRaw = bot.calculateState()
             if bot.position == bot.maze.end:
                 done = True
 
+        runtime.steps += 1
+        bot.currentEpisodeSteps = int(runtime.steps)
+
         if not done and runtime.steps >= runtime.stepLimit:
-            reward += -100.0
+            reward += float(bot.config.stepLimitPenalty)
             runtime.outcome = "step_limit"
             done = True
         if not done and runtime.noProgressSteps >= runtime.progressPatience:
@@ -253,17 +252,24 @@ class DQNEpisodeRunner:
         nextEncoded = bot.encodeState(nextStateRaw)
         transition = bot.makeTransition(encodedState, action, reward, nextEncoded, done)
         bot.agent.storeTransition(transition)
-        bot.agent.trainStep()
-        bot.agent.onEnvironmentStep()
-        bot.state = nextStateRaw
-        bot.totalReward += reward
+        if not bot.isWarmingUp:
+            bot.agent.trainStep()
+            bot.agent.onEnvironmentStep()
+        bot.addReward(reward)
         return not done
 
     def _finalizeEpisode(self, runtime: DQNEpisodeRuntime) -> None:
         bot = self.bot
+        bot.lastEpisodeSuccess = runtime.outcome == "goal_reached"
+        bot.lastEpisodeSteps = int(runtime.steps)
+        bot.lastEpisodeOptimalSteps = int(runtime.optimalLength)
         heatmapData = dict(bot.statistics.getVisitedPositions())
         if not heatmapData:
             heatmapData[tuple(bot.position)] = 1
+        if bot.isWarmingUp:
+            bot.episodeCounter += 1
+            bot.currentEpisodeSteps = 0
+            return
         try:
             bot.repo.saveMazeEpisode(bot.profileName, bot.maze, heatmapData, bot.totalReward)
             bot.repo.updateStepsFromHeatmap(bot.profileName, heatmapData)

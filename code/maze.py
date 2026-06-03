@@ -105,6 +105,16 @@ class Maze:
         self.setStart(*self.start)
         self.setGoal(*self.end)
 
+    def resize(self, width: int, height: int, regenerate: bool = True) -> None:
+        """Resize the maze dimensions and optionally regenerate topology."""
+        newWidth = max(5, int(width))
+        newHeight = max(5, int(height))
+        self.width = newWidth
+        self.height = newHeight
+        self.minimumDistance = max(newWidth, newHeight) // 2
+        if regenerate:
+            self.setupSimpleMaze()
+
     def getState(self) -> MazeState:
         """Return a serializable snapshot of the current maze state."""
         return {

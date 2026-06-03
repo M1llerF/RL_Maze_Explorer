@@ -4,6 +4,7 @@ from tkinter import ttk
 from typing import Any
 
 from displayTools import DisplayTools
+from ui.scrollable import VerticalScrolledFrame
 
 
 class ProfileManagementFrame(tk.Frame):
@@ -11,15 +12,24 @@ class ProfileManagementFrame(tk.Frame):
         super().__init__(parent)
         self.controller = controller
 
-        ttk.Label(self, text="Profile Management", font=("TkDefaultFont", 20)).pack(pady=10, padx=10)
-        ttk.Button(self, text="Create New Profile", command=self.createNewProfile).pack(pady=10)
+        scrollHost = VerticalScrolledFrame(self)
+        scrollHost.pack(fill=tk.BOTH, expand=True)
+        content = scrollHost.content
 
-        self.profileList = tk.Listbox(self)
-        self.profileList.pack(pady=10)
+        ttk.Label(content, text="Profile Management", font=("TkDefaultFont", 20)).pack(pady=10, padx=10)
+        ttk.Button(content, text="Create New Profile", command=self.createNewProfile).pack(pady=10)
+
+        listFrame = ttk.Frame(content)
+        listFrame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        self.profileList = tk.Listbox(listFrame)
+        listScrollbar = ttk.Scrollbar(listFrame, orient="vertical", command=self.profileList.yview)
+        self.profileList.configure(yscrollcommand=listScrollbar.set)
+        self.profileList.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        listScrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.loadProfiles()
         self.profileList.bind("<Double-Button-1>", self.onProfileDoubleClick)
 
-        ttk.Button(self, text="Delete Profile", command=self.deleteProfile).pack(pady=10)
+        ttk.Button(content, text="Delete Profile", command=self.deleteProfile).pack(pady=10)
 
     def onShow(self) -> None:
         # Refresh when navigated back
@@ -46,4 +56,3 @@ class ProfileManagementFrame(tk.Frame):
         self.loadProfiles()
         self.controller.frames["BotTrainingFrame"].loadProfiles()
         self.controller.frames["VisualizationFrame"].loadProfiles()
-

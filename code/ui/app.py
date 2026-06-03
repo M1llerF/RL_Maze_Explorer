@@ -18,6 +18,8 @@ class MazeAIApp:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title("Maze AI Experiment")
+        self.root.rowconfigure(0, weight=1)
+        self.root.columnconfigure(0, weight=1)
         # Ensure a default folder exists for user mazes
         try:
             os.makedirs('mazes', exist_ok=True)

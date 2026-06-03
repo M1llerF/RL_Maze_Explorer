@@ -15,6 +15,7 @@ from botFactory import BotFactory
 from botProfile import BotProfile, ProfileManager
 from botStatistics import BotStatistics
 from bots.qlearning import QLearning, QLearningBot
+from bots.dqnlearning import DQNConfig
 from rewardSystem import RewardConfig
 from rewardSystem import RewardSystem
 from services.runners import QLearningEpisodeRunner
@@ -417,6 +418,54 @@ class TypingRegressionTests(unittest.TestCase):
             self.assertEqual(loaded.config.discountFactor, 0.85)
             self.assertFalse(loaded.config.usePositionInState)
             self.assertEqual(loaded.botSpecificData.get("tag"), "x")
+
+    def testProfileManagerRoundTripDqnProfile(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            manager = ProfileManager(td)
+            cfg = DQNConfig.from_profile_dict(
+                {
+                    "learningRate": 5e-4,
+                    "discountFactor": 0.99,
+                    "replayCapacity": 12345,
+                    "useRichEncoding": 1,
+                    "epsilonDecaySteps": 54321,
+                }
+            )
+            src = BotProfile(
+                name="roundtrip_dqn",
+                botType="DQNBot",
+                config=cfg,
+                rewardConfig=RewardConfig(),
+                statistics=BotStatistics(),
+                botSpecificData={"note": "dqn"},
+            )
+            manager.saveProfile(src)
+            loaded = manager.loadProfile("roundtrip_dqn")
+            self.assertEqual(loaded.botType, "DQNBot")
+            self.assertIsInstance(loaded.config, DQNConfig)
+            dqnCfg = cast(DQNConfig, loaded.config)
+            self.assertEqual(dqnCfg.replayCapacity, 12345)
+            self.assertEqual(dqnCfg.epsilonDecaySteps, 54321)
+            self.assertTrue(dqnCfg.useRichEncoding)
+
+    def testProfileManagerRoundTripRewardModifiers(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            manager = ProfileManager(td)
+            rc = RewardConfig()
+            rc.rewardModifiers["per_move_penalty"] = "-0.5"
+            rc.rewardModifiers["goal_reached"] = "1234"
+            src = BotProfile(
+                name="roundtrip_reward",
+                botType="DQNBot",
+                config=DQNConfig(),
+                rewardConfig=rc,
+                statistics=BotStatistics(),
+                botSpecificData={},
+            )
+            manager.saveProfile(src)
+            loaded = manager.loadProfile("roundtrip_reward")
+            self.assertEqual(loaded.rewardConfig.rewardModifiers.get("per_move_penalty"), "-0.5")
+            self.assertEqual(loaded.rewardConfig.rewardModifiers.get("goal_reached"), "1234")
 
     def testVisualizationStepDoesNotPersistTrainingArtifacts(self) -> None:
         maze = _RunnerDummyMaze()

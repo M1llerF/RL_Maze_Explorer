@@ -9,7 +9,7 @@ import numpy as np
 
 from displayTools import DisplayTools
 from rewardGrapher import RewardGrapher
-from visualizationStrategy import QLearningBotVisualizationStrategy
+from visualizationStrategy import DefaultVisualizationStrategy
 
 
 class VisualizationWindow(tk.Toplevel):
@@ -146,9 +146,7 @@ class VisualizationFrame(tk.Frame):
     def __init__(self, parent: Any, controller: Any) -> None:
         super().__init__(parent)
         self.controller = controller
-        self.visualizationStrategies = {
-            'QLearningBot': QLearningBotVisualizationStrategy(),
-        }
+        self._visualizationStrategy = DefaultVisualizationStrategy()
         self.canvasAgg: Any = None
 
         ttk.Label(self, text="Visualizations", font=("TkDefaultFont", 20)).pack(pady=10, padx=10)
@@ -217,9 +215,7 @@ class VisualizationFrame(tk.Frame):
         profile = self.controller.gameEnv.profileManager.loadProfile(selectedProfile)
         profileIndex = self.controller.gameEnv.applyProfile(profile)
         bot = self.controller.gameEnv.bots[profileIndex]
-        strategy = self.visualizationStrategies.get(profile.botType)
-        if strategy:
-            strategy.visualize(self, bot, profileIndex)
+        self._visualizationStrategy.visualize(self, bot, profileIndex)
 
     def displayHeatmap(self, canvas: Any, maze: Any, start: Any, end: Any, heatmapData: Any) -> None:
         try:
@@ -229,7 +225,7 @@ class VisualizationFrame(tk.Frame):
 
     def displayQtable(self, bot: Any, profileIndex: int) -> None:
         self.qtableOutput.delete("1.0", tk.END)
-        if hasattr(bot, 'q_learning') and hasattr(bot.qLearning, 'q_table'):
+        if hasattr(bot, 'qLearning') and hasattr(bot.qLearning, 'qTable'):
             topValues = self.getTopQValues(bot, profileIndex)
             self.qtableOutput.insert(tk.END, "Top Q-Table Values:\n")
             for i, (qValue, (state, actions)) in enumerate(topValues):

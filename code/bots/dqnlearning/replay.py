@@ -58,3 +58,61 @@ class UniformReplayStore:
 
     def __len__(self) -> int:
         return self.size
+
+    def to_serializable(self) -> dict[str, object]:
+        entries: list[dict[str, object]] = []
+        for i in range(self.size):
+            t = self.buffer[i]
+            if t is None:
+                continue
+            entries.append(
+                {
+                    "state": np.asarray(t.state, dtype=np.float32).tolist(),
+                    "action": int(t.action),
+                    "reward": float(t.reward),
+                    "next_state": np.asarray(t.nextState, dtype=np.float32).tolist(),
+                    "done": bool(t.done),
+                    "valid_action_mask": np.asarray(t.validActionMask, dtype=np.bool_).tolist(),
+                    "next_valid_action_mask": np.asarray(t.nextValidActionMask, dtype=np.bool_).tolist(),
+                }
+            )
+        return {
+            "capacity": int(self.capacity),
+            "size": int(self.size),
+            "next_index": int(self.nextIndex),
+            "entries": entries,
+        }
+
+    def load_serializable(self, data: dict[str, object]) -> None:
+        capacity = int(data.get("capacity", self.capacity))
+        size = int(data.get("size", 0))
+        nextIndex = int(data.get("next_index", 0))
+        rawEntries = data.get("entries", [])
+        if not isinstance(rawEntries, list):
+            raise ValueError("replay entries payload is invalid")
+        if capacity != self.capacity:
+            raise ValueError(f"replay capacity mismatch: checkpoint={capacity}, runtime={self.capacity}")
+        if size < 0 or size > self.capacity:
+            raise ValueError("replay size payload is invalid")
+        if nextIndex < 0 or nextIndex >= self.capacity:
+            raise ValueError("replay nextIndex payload is invalid")
+
+        self.buffer = [None] * self.capacity
+        self.size = 0
+        self.nextIndex = 0
+        for idx, item in enumerate(rawEntries[: self.capacity]):
+            if not isinstance(item, dict):
+                raise ValueError("replay entry payload is invalid")
+            transition = Transition(
+                state=np.asarray(item["state"], dtype=np.float32),
+                action=int(item["action"]),
+                reward=float(item["reward"]),
+                nextState=np.asarray(item["next_state"], dtype=np.float32),
+                done=bool(item["done"]),
+                validActionMask=np.asarray(item["valid_action_mask"], dtype=np.bool_),
+                nextValidActionMask=np.asarray(item["next_valid_action_mask"], dtype=np.bool_),
+            )
+            self.buffer[idx] = transition
+            self.size += 1
+        self.size = min(self.size, size)
+        self.nextIndex = nextIndex
