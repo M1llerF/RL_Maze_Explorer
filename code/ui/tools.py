@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
+from environment.entities import normalize_enemy_behavior
+
 
 class BaseTool:
     name: str = ""
@@ -69,7 +71,7 @@ class EnemyTool(BaseTool):
                 "position": [y, x],
                 "damage": 20.0,
                 "alive": True,
-                "behavior": {"kind": kind},
+                "behavior": normalize_enemy_behavior({"kind": kind}),
             }]
 
 
@@ -79,4 +81,3 @@ def _buildRegistry() -> Dict[str, BaseTool]:
 
 
 TOOLREGISTRY: Dict[str, BaseTool] = _buildRegistry()
-

@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 import pickle
 import tempfile
+import threading
+import time
 from typing import Any, cast
 
 from botConfigs import buildConfigForBotType
@@ -139,6 +141,9 @@ class BotProfile:
         )
 
 class ProfileManager:
+    _pathLocks: dict[str, threading.Lock] = {}
+    _pathLocksGuard = threading.Lock()
+
     def __init__(self, profileDirectory: str) -> None:
         """
         Initialize the ProfileManager with a directory for storing profiles.
@@ -146,6 +151,30 @@ class ProfileManager:
         :param profile_directory: The directory where profiles are stored.
         """
         self.profileDirectory = profileDirectory
+
+    @classmethod
+    def _lockForPath(cls, path: str) -> threading.Lock:
+        normalized = os.path.abspath(path)
+        with cls._pathLocksGuard:
+            lock = cls._pathLocks.get(normalized)
+            if lock is None:
+                lock = threading.Lock()
+                cls._pathLocks[normalized] = lock
+            return lock
+
+    def _atomicReplace(self, tempPath: str, path: str) -> None:
+        lock = self._lockForPath(path)
+        with lock:
+            last_error: OSError | None = None
+            for delay in (0.0, 0.01, 0.05, 0.1, 0.25):
+                if delay > 0.0:
+                    time.sleep(delay)
+                try:
+                    os.replace(tempPath, path)
+                    return
+                except PermissionError as exc:
+                    last_error = exc
+            raise cast(OSError, last_error)
 
     def saveProfile(self, profile: BotProfile) -> None:
         """
@@ -164,7 +193,7 @@ class ProfileManager:
         with tempfile.NamedTemporaryFile(delete=False, dir=dirPath, mode='wb') as tmp:
             pickle.dump(profileDict, tmp)
             tempName = tmp.name
-        os.replace(tempName, filename)
+        self._atomicReplace(tempName, filename)
 
         # Training artifact stubs (SimulationRewards.txt, HeatmapData.txt, mazes.json)
         # are created by ArtifactsRepository.ensureProfileArtifacts(), not here.

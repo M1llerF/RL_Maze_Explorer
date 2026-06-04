@@ -32,6 +32,9 @@ class PostEpisodeRecorder:
                 repo.updateStepsFromHeatmap(profile, result.heatmap_data)
                 if result.times_hit_wall:
                     repo.incrementTimesHitWall(profile, result.times_hit_wall)
+                timesHitEnemy = int(getattr(getattr(bot, "statistics", None), "timesHitEnemy", 0))
+                if timesHitEnemy:
+                    repo.incrementTimesHitEnemy(profile, timesHitEnemy)
         except Exception as e:
             print(f"[EpisodeFinalize] Artifact persistence failed for '{profile}': {e}")
 

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-import random
 from typing import Any, Protocol, cast
 
 from bots.common.actions import DIRECTION_DELTAS, UP, DOWN, LEFT, RIGHT
@@ -96,94 +95,6 @@ class ChaseEnemyBehavior:
         return
 
 
-class RandomWalkerEnemyBehavior:
-    _DIRECTION_ORDER: tuple[int, int, int, int] = (UP, DOWN, LEFT, RIGHT)
-
-    def choose_action(self, enemy: Enemy, context: EnvironmentContext) -> EnemyAction:
-        state = _behavior_state(enemy)
-        step = int(state.get("step", 0))
-        seed = int(state.get("seed", 0))
-        current = cast(tuple[int, int], enemy.position)
-        candidates: list[int] = []
-        for direction in self._DIRECTION_ORDER:
-            dr, dc = DIRECTION_DELTAS[direction]
-            target = (current[0] + dr, current[1] + dc)
-            if context.isValidPosition(target):
-                candidates.append(direction)
-        if not candidates:
-            return EnemyAction(direction=None)
-        rng = random.Random(f"{seed}:{enemy.id}:{step}")
-        direction = candidates[rng.randrange(len(candidates))]
-        return EnemyAction(direction=direction, metadata={"next_step": step + 1})
-
-    def on_resolution(
-        self,
-        enemy: Enemy,
-        action: EnemyAction,
-        *,
-        moved: bool,
-        blocked_reason: str | None = None,
-    ) -> None:
-        nextStep = action.metadata.get("next_step")
-        if nextStep is not None:
-            _behavior_state(enemy)["step"] = int(nextStep)
-
-
-class PatrolEnemyBehavior:
-    def choose_action(self, enemy: Enemy, context: EnvironmentContext) -> EnemyAction:
-        state = _behavior_state(enemy)
-        rawPath = state.get("path", [])
-        path = [
-            (int(pos[0]), int(pos[1]))
-            for pos in rawPath
-            if isinstance(pos, (list, tuple)) and len(pos) == 2
-        ]
-        if len(path) < 2:
-            return EnemyAction(direction=None)
-
-        current = cast(tuple[int, int], enemy.position)
-        currentIndex = int(state.get("index", 0))
-        reverse = bool(state.get("reverse", False))
-        if current in path:
-            currentIndex = path.index(current)
-        step = -1 if reverse else 1
-        nextIndex = currentIndex + step
-        loop = bool(state.get("loop", True))
-        if nextIndex < 0 or nextIndex >= len(path):
-            if loop:
-                nextIndex = 0 if nextIndex >= len(path) else len(path) - 1
-            else:
-                reverse = not reverse
-                step = -1 if reverse else 1
-                nextIndex = currentIndex + step
-                if nextIndex < 0 or nextIndex >= len(path):
-                    return EnemyAction(direction=None)
-        target = path[nextIndex]
-        direction = _direction_to_neighbor(current, target)
-        if direction is None:
-            return EnemyAction(direction=None)
-        return EnemyAction(
-            direction=direction,
-            metadata={"next_index": nextIndex, "reverse": reverse},
-        )
-
-    def on_resolution(
-        self,
-        enemy: Enemy,
-        action: EnemyAction,
-        *,
-        moved: bool,
-        blocked_reason: str | None = None,
-    ) -> None:
-        if not moved:
-            return
-        state = _behavior_state(enemy)
-        if "next_index" in action.metadata:
-            state["index"] = int(action.metadata["next_index"])
-        if "reverse" in action.metadata:
-            state["reverse"] = bool(action.metadata["reverse"])
-
-
 class EnemyBehaviorFactory:
     @staticmethod
     def for_enemy(enemy: Enemy) -> EnemyBehavior:
@@ -191,10 +102,6 @@ class EnemyBehaviorFactory:
         behaviorKind = "stationary"
         if isinstance(rawBehavior, dict):
             behaviorKind = str(rawBehavior.get("kind", "stationary")).strip().lower()
-        if behaviorKind == "random_walk":
-            return RandomWalkerEnemyBehavior()
-        if behaviorKind == "patrol":
-            return PatrolEnemyBehavior()
         if behaviorKind == "chase":
             return ChaseEnemyBehavior()
         return StationaryEnemyBehavior()
@@ -359,22 +266,3 @@ class EnemySystem:
             for entity in context.entityRegistry.allEntities()
             if not isinstance(entity, (Wall, Goal))
         ]
-
-
-def _behavior_state(enemy: Enemy) -> dict[str, Any]:
-    state = getattr(enemy, "_behavior", None)
-    if not isinstance(state, dict):
-        state = {"kind": "stationary"}
-        enemy._behavior = state
-    return cast(dict[str, Any], state)
-
-
-def _direction_to_neighbor(
-    current: tuple[int, int],
-    target: tuple[int, int],
-) -> int | None:
-    delta = (target[0] - current[0], target[1] - current[1])
-    for direction, directionDelta in DIRECTION_DELTAS.items():
-        if tuple(directionDelta) == delta:
-            return int(direction)
-    return None

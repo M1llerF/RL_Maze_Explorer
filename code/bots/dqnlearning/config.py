@@ -73,6 +73,7 @@ class DQNConfig:
     useEntityObservation: bool = True
     useEnemyObservation: bool = False
     useAttackActions: bool = False
+    autoAttackAdjacentEnemy: bool = False
     pushCooldownSteps: int = 3
     useMacroActions: bool = False
     useMacroOnlyPolicy: bool = False
@@ -144,6 +145,10 @@ class DQNConfig:
             useEntityObservation=_as_bool(raw.get("useEntityObservation", cls.useEntityObservation), "useEntityObservation"),
             useEnemyObservation=_as_bool(raw.get("useEnemyObservation", cls.useEnemyObservation), "useEnemyObservation"),
             useAttackActions=_as_bool(raw.get("useAttackActions", cls.useAttackActions), "useAttackActions"),
+            autoAttackAdjacentEnemy=_as_bool(
+                raw.get("autoAttackAdjacentEnemy", cls.autoAttackAdjacentEnemy),
+                "autoAttackAdjacentEnemy",
+            ),
             pushCooldownSteps=_as_int(raw.get("pushCooldownSteps", cls.pushCooldownSteps), "pushCooldownSteps", 1),
             useMacroActions=_as_bool(raw.get("useMacroActions", cls.useMacroActions), "useMacroActions")
             or useMacroOnlyPolicy

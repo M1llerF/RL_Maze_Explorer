@@ -31,6 +31,7 @@ class RewardConfig:
             'hit_wall': '-100',
             'revisit_optimal_path': '-10',
             'revisit_non_optimal_path': '-15',
+            'new_tile_visited': '2',
             'move_in_optimal_path': '5',
             'see_goal_new_location': '50',
             'see_goal_revisit': '5',
@@ -220,6 +221,8 @@ class RewardSystem:
             elif key == 'revisit_optimal_path' and step.new_position in step.visited_positions and step.new_position in step.optimal_path:
                 reward += self.evaluateExpression(valueExpr, **context)
             elif key == 'revisit_non_optimal_path' and step.new_position in step.visited_positions and step.new_position not in step.optimal_path:
+                reward += self.evaluateExpression(valueExpr, **context)
+            elif key == 'new_tile_visited' and not step.hit_wall and step.new_position not in step.visited_positions:
                 reward += self.evaluateExpression(valueExpr, **context)
             elif key == 'move_in_optimal_path' and step.new_position in step.optimal_path:
                 reward += self.evaluateExpression(valueExpr, **context)

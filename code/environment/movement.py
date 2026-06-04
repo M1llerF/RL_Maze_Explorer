@@ -195,6 +195,10 @@ class AttackActionExecutor:
         if enemy is None:
             return StepResult(reward=0.0, done=False, info={"attack_miss": True}, duration=1)
 
+        stats = getattr(context.bot, "statistics", None)
+        if stats is not None and hasattr(stats, "timesHitEnemy"):
+            stats.timesHitEnemy = int(getattr(stats, "timesHitEnemy", 0)) + 1
+
         push_target = (target[0] + dr, target[1] + dc)
         can_push = (
             context.isValidPosition(push_target)

@@ -14,6 +14,7 @@ class QLearningConfig:
         useEntityObservation: bool = True,
         useEnemyObservation: bool = False,
         useAttackActions: bool = False,
+        autoAttackAdjacentEnemy: bool = False,
         pushCooldownSteps: int = 3,
         rewardClipMin: float | None = None,
         rewardClipMax: float | None = None,
@@ -26,6 +27,7 @@ class QLearningConfig:
         self.useEntityObservation = bool(useEntityObservation)
         self.useEnemyObservation = bool(useEnemyObservation)
         self.useAttackActions = bool(useAttackActions)
+        self.autoAttackAdjacentEnemy = bool(autoAttackAdjacentEnemy)
         self.pushCooldownSteps = max(1, int(pushCooldownSteps))
         self.rewardClipMin = rewardClipMin
         self.rewardClipMax = rewardClipMax
@@ -54,6 +56,7 @@ BOT_SPEC: dict[str, Any] = {
         "Use Entity Observation (0/1)": "useEntityObservation",
         "Use Enemy Observation (0/1)": "useEnemyObservation",
         "Use Attack Actions (0/1)": "useAttackActions",
+        "Auto Attack Adjacent Enemy (0/1)": "autoAttackAdjacentEnemy",
         "Push Cooldown Steps": "pushCooldownSteps",
         "Reward Clip Min": "rewardClipMin",
         "Reward Clip Max": "rewardClipMax",
@@ -70,6 +73,7 @@ BOT_SPEC: dict[str, Any] = {
         "useEntityObservation": "general",
         "useEnemyObservation": "general",
         "useAttackActions": "general",
+        "autoAttackAdjacentEnemy": "general",
         "pushCooldownSteps": "general",
         "rewardClipMin": "rewards",
         "rewardClipMax": "rewards",
@@ -82,6 +86,7 @@ BOT_SPEC: dict[str, Any] = {
         "useEntityObservation": "Include extra observed environment features in the state representation.",
         "useEnemyObservation": "Append a compact enemy-scan slot (direction bucket and distance bucket) to the Q-table key. Keep disabled unless enemies are present to avoid unnecessary state explosion.",
         "useAttackActions": "Enable directional attack actions (attack_up/down/left/right). Adds 4 new actions that kill adjacent enemies in 1 hit. Incompatible with existing Q-tables.",
+        "autoAttackAdjacentEnemy": "Cheat toggle: when enabled and attack actions are available, the bot forcibly picks the matching attack action whenever a live enemy is adjacent. Useful for proving combat wiring and bootstrapping combat learning.",
         "pushCooldownSteps": "Cooldown (in steps) between pushes. Bot cannot push-displace an enemy until this many steps have passed since the last push.",
         "rewardClipMin": "Optional lower bound for reward clipping. Leave both clip fields blank to disable clipping.",
         "rewardClipMax": "Optional upper bound for reward clipping. Leave both clip fields blank to disable clipping.",
@@ -92,6 +97,7 @@ BOT_SPEC: dict[str, Any] = {
         "hit_wall": -100,
         "revisit_optimal_path": -10,
         "revisit_non_optimal_path": -15,
+        "new_tile_visited": 2,
         "move_in_optimal_path": 5,
         "see_goal_new_location": 50,
         "see_goal_revisit": 5,
@@ -105,6 +111,7 @@ BOT_SPEC: dict[str, Any] = {
         "hit_wall": "Hit Wall Penalty",
         "revisit_optimal_path": "Revisit Optimal Path Penalty",
         "revisit_non_optimal_path": "Revisit Non-Optimal Path Penalty",
+        "new_tile_visited": "New Tile Visited Reward",
         "move_in_optimal_path": "Move In Optimal Path Reward",
         "see_goal_new_location": "See Goal New Location Reward",
         "see_goal_revisit": "See Goal Revisit Reward",
@@ -127,6 +134,10 @@ BOT_SPEC: dict[str, Any] = {
             ],
         },
         {
+            "title": "Exploration",
+            "keys": ["new_tile_visited"],
+        },
+        {
             "title": "Positive Rewards",
             "keys": [
                 "goal_reached",
@@ -145,6 +156,7 @@ BOT_SPEC: dict[str, Any] = {
         "hit_wall": "Penalty applied when the bot tries to move into a wall.",
         "revisit_optimal_path": "Reward or penalty for revisiting a tile that lies on the optimal path.",
         "revisit_non_optimal_path": "Reward or penalty for revisiting a tile outside the optimal path.",
+        "new_tile_visited": "Reward granted the first time the bot steps onto a tile it has not visited yet in the current episode.",
         "move_in_optimal_path": "Reward for moving along the optimal path toward the goal.",
         "see_goal_new_location": "Reward when the bot first spots the goal from a new position.",
         "see_goal_revisit": "Reward when the bot spots the goal again from a previously used viewpoint.",

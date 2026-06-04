@@ -6,6 +6,20 @@ if TYPE_CHECKING:
     from environment.context import EnvironmentContext
 
 
+ALLOWED_ENEMY_BEHAVIOR_KINDS = frozenset({"stationary", "chase"})
+
+
+def normalize_enemy_behavior(raw_behavior: Any) -> dict[str, Any]:
+    if not isinstance(raw_behavior, dict):
+        return {"kind": "stationary"}
+    behavior = dict(raw_behavior)
+    kind = str(behavior.get("kind", "stationary")).strip().lower()
+    if kind not in ALLOWED_ENEMY_BEHAVIOR_KINDS:
+        return {"kind": "stationary"}
+    behavior["kind"] = kind
+    return behavior
+
+
 # ── Entity base ───────────────────────────────────────────────────────────────
 
 class Entity:
@@ -86,7 +100,7 @@ class Enemy(Entity, BlocksMovement, DamagesAgent, CanBeAttacked, ProvidesObserva
         super().__init__(entity_id=f"enemy_{position}", entity_type="enemy", position=position)
         self._damage = damage
         self._alive = True
-        self._behavior = dict(behavior or {"kind": "stationary"})
+        self._behavior = normalize_enemy_behavior(behavior)
 
     def blocksMovement(self, context: EnvironmentContext, direction: int) -> bool:
         return self._alive
@@ -131,7 +145,7 @@ def entity_to_state(entity: Entity) -> dict[str, Any]:
     elif isinstance(entity, Enemy):
         state["damage"] = float(entity._damage)
         state["alive"] = bool(entity._alive)
-        state["behavior"] = dict(getattr(entity, "_behavior", {"kind": "stationary"}))
+        state["behavior"] = normalize_enemy_behavior(getattr(entity, "_behavior", {"kind": "stationary"}))
     elif isinstance(entity, LockedDoor):
         state["locked"] = bool(entity._locked)
     return state
@@ -150,9 +164,7 @@ def entity_from_state(data: dict[str, Any]) -> Entity:
         enemy = Enemy(
             position,
             damage=float(data.get("damage", 20.0)),
-            behavior=cast(dict[str, Any], data.get("behavior", {"kind": "stationary"}))
-            if isinstance(data.get("behavior", {"kind": "stationary"}), dict)
-            else {"kind": "stationary"},
+            behavior=normalize_enemy_behavior(data.get("behavior", {"kind": "stationary"})),
         )
         if not bool(data.get("alive", True)):
             enemy._alive = False

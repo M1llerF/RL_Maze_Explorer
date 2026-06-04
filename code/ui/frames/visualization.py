@@ -173,10 +173,11 @@ class VisualizationWindow(tk.Toplevel):
             else:
                 self.canvas.create_rectangle(x0, y0, x1, y1, fill="#616161", outline="#424242")
         # Attack flash: bright burst at killed-enemy positions, decays over 5 frames
-        expired = [pos for pos, ttl in self._attackFlashes.items() if ttl <= 0]
+        flashes = getattr(self, "_attackFlashes", {})
+        expired = [pos for pos, ttl in flashes.items() if ttl <= 0]
         for pos in expired:
-            del self._attackFlashes[pos]
-        for (fr, fc), ttl in list(self._attackFlashes.items()):
+            del flashes[pos]
+        for (fr, fc), ttl in list(flashes.items()):
             intensity = ttl / 5.0
             x0, y0 = fc * cellWidth, fr * cellHeight
             x1, y1 = (fc + 1) * cellWidth, (fr + 1) * cellHeight
@@ -189,7 +190,7 @@ class VisualizationWindow(tk.Toplevel):
             arm = min(cellWidth, cellHeight) * 0.35 * intensity
             self.canvas.create_line(cx - arm, cy, cx + arm, cy, fill="white", width=max(1, int(2 * intensity)))
             self.canvas.create_line(cx, cy - arm, cx, cy + arm, fill="white", width=max(1, int(2 * intensity)))
-            self._attackFlashes[(fr, fc)] -= 1
+            flashes[(fr, fc)] -= 1
 
         botPosition = snapshot.bot_position
         self.canvas.create_oval(botPosition[1] * cellWidth, botPosition[0] * cellHeight,
@@ -363,6 +364,7 @@ class VisualizationFrame(tk.Frame):
         self.statisticsOutput.insert(tk.END, f"Non-Repeating Steps: {profileData.get('non_repeating_steps_taken', 0)}\n")
         self.statisticsOutput.insert(tk.END, f"Times Revisited Squares: {profileData.get('times_revisited_squares', 0)}\n")
         self.statisticsOutput.insert(tk.END, f"Times Bot Hit Wall: {profileData.get('times_hit_wall', 0)}\n")
+        self.statisticsOutput.insert(tk.END, f"Times Bot Hit Enemy: {profileData.get('times_hit_enemy', 0)}\n")
 
     def displayRewardGraph(self, bot: Any) -> None:
         snapshot = self._visualizationService.build_snapshot(bot.profileName, bot)

@@ -3,6 +3,8 @@ import pickle
 import hashlib
 import shutil
 import tempfile
+import threading
+import time
 from typing import Any, cast
 
 
@@ -12,7 +14,7 @@ HeatmapData = dict[tuple[int, int], int]
 
 _STATS_KEYS: frozenset[str] = frozenset({
     'total_steps', 'non_repeating_steps_taken',
-    'times_revisited_squares', 'times_hit_wall',
+    'times_revisited_squares', 'times_hit_wall', 'times_hit_enemy',
 })
 
 
@@ -34,12 +36,39 @@ class ArtifactsRepository:
     def __init__(self, baseDir: str = "profiles"):
         self.baseDir = baseDir
 
+    _pathLocks: dict[str, threading.Lock] = {}
+    _pathLocksGuard = threading.Lock()
+
     # ---------- Helpers ----------
     def _profileDir(self, profile: str) -> str:
         return os.path.join(self.baseDir, profile)
 
     def _ensureDir(self, path: str) -> None:
         os.makedirs(path, exist_ok=True)
+
+    @classmethod
+    def _lockForPath(cls, path: str) -> threading.Lock:
+        normalized = os.path.abspath(path)
+        with cls._pathLocksGuard:
+            lock = cls._pathLocks.get(normalized)
+            if lock is None:
+                lock = threading.Lock()
+                cls._pathLocks[normalized] = lock
+            return lock
+
+    def _atomicReplace(self, tempPath: str, path: str) -> None:
+        lock = self._lockForPath(path)
+        with lock:
+            last_error: OSError | None = None
+            for delay in (0.0, 0.01, 0.05, 0.1, 0.25):
+                if delay > 0.0:
+                    time.sleep(delay)
+                try:
+                    os.replace(tempPath, path)
+                    return
+                except PermissionError as exc:
+                    last_error = exc
+            raise cast(OSError, last_error)
 
     # ---------- Generic paths ----------
     def _profilePath(self, profile: str) -> str:
@@ -85,7 +114,7 @@ class ArtifactsRepository:
         with tempfile.NamedTemporaryFile(delete=False, dir=d, mode='wb') as tmp:
             tmp.write(data)
             temp = tmp.name
-        os.replace(temp, path)
+        self._atomicReplace(temp, path)
 
     def loadModelArtifactBytes(self, profile: str, artifactName: str) -> bytes | None:
         path = self.modelArtifactPath(profile, artifactName)
@@ -112,7 +141,7 @@ class ArtifactsRepository:
         with tempfile.NamedTemporaryFile(delete=False, dir=d) as tmp:
             pickle.dump(qTable, tmp)
             tempName = tmp.name
-        os.replace(tempName, path)
+        self._atomicReplace(tempName, path)
         # Write checksum
         chksum = self._fileChecksum(path)
         with open(self.qTableChecksumPath(profile), 'w') as f:
@@ -185,7 +214,7 @@ class ArtifactsRepository:
         with tempfile.NamedTemporaryFile(delete=False, dir=d, mode='wb') as tmp:
             pickle.dump(data, tmp)
             temp = tmp.name
-        os.replace(temp, path)
+        self._atomicReplace(temp, path)
 
     def readProfileStats(self, profile: str) -> ProfileDict:
         return self._readProfileDict(profile)
@@ -198,6 +227,7 @@ class ArtifactsRepository:
         nonRepeatingStepsTaken: int | None = None,
         timesRevisitedSquares: int | None = None,
         timesHitWallIncrement: int | None = None,
+        timesHitEnemyIncrement: int | None = None,
     ) -> None:
         data = self._readProfileDict(profile)
         if totalSteps is not None:
@@ -208,10 +238,15 @@ class ArtifactsRepository:
             data['times_revisited_squares'] = int(data.get('times_revisited_squares', 0)) + int(timesRevisitedSquares)
         if timesHitWallIncrement is not None:
             data['times_hit_wall'] = int(data.get('times_hit_wall', 0)) + int(timesHitWallIncrement)
+        if timesHitEnemyIncrement is not None:
+            data['times_hit_enemy'] = int(data.get('times_hit_enemy', 0)) + int(timesHitEnemyIncrement)
         self._writeProfileDict(profile, data)
 
     def incrementTimesHitWall(self, profile: str, n: int = 1) -> None:
         self.updateProfileCounters(profile, timesHitWallIncrement=int(n))
+
+    def incrementTimesHitEnemy(self, profile: str, n: int = 1) -> None:
+        self.updateProfileCounters(profile, timesHitEnemyIncrement=int(n))
 
     # ---------- Mazes.json helpers ----------
     def loadMazeData(self, profile: str) -> ProfileDict:
@@ -319,7 +354,7 @@ class ArtifactsRepository:
         with tempfile.NamedTemporaryFile(delete=False, dir=d, mode='w') as tmp:
             json.dump(data, tmp, indent=4)
             temp = tmp.name
-        os.replace(temp, path)
+        self._atomicReplace(temp, path)
 
     def ensureProfileArtifacts(self, profile: str) -> None:
         """Create empty artifact stubs for a newly created profile."""
@@ -348,7 +383,7 @@ class ArtifactsRepository:
         with tempfile.NamedTemporaryFile(delete=False, dir=d, mode='w') as tmp:
             json.dump(data, tmp, indent=4)
             temp = tmp.name
-        os.replace(temp, path)
+        self._atomicReplace(temp, path)
 
     def clearProfileTrainingArtifacts(self, profile: str) -> None:
         """Delete durable training artifacts while keeping the profile itself."""

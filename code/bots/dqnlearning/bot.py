@@ -502,6 +502,9 @@ class DQNBot(BaseBot):
         allowWarmupPlanner: bool = True,
     ) -> ActionChoice:
         decision = self.buildDecisionInput(training=training)
+        autoAttackLocalId = self.autoAttackAdjacentEnemyLocalId(decision.actionSpace)
+        if autoAttackLocalId is not None:
+            return ActionChoice(local_id=autoAttackLocalId)
         if isinstance(self.agent, DqnAgent):
             warmupAction = self.warmupCoordinator.selectAction(
                 self,

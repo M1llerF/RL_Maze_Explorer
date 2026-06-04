@@ -9,6 +9,7 @@ class BotStatistics:
     def __init__(self) -> None:
         self.totalSteps: int = 0
         self.timesHitWall: int = 0
+        self.timesHitEnemy: int = 0
         self.timesRevisitedSquares: int = 0
         self.nonRepeatingStepsTaken: int = 0
         self.visitedPositions: Dict[Tuple[int, int], int] = {}
@@ -17,6 +18,7 @@ class BotStatistics:
     def reset(self) -> None:
         self.totalSteps = 0
         self.timesHitWall = 0
+        self.timesHitEnemy = 0
         self.timesRevisitedSquares = 0
         self.nonRepeatingStepsTaken = 0
         self.visitedPositions.clear()

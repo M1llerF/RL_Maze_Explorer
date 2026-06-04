@@ -390,6 +390,9 @@ class QLearningBot(BaseBot):
         return self._actionRegistry.executePrimitive(semanticId, self._context)
 
     def selectAction(self, decision: Any) -> Any:
+        autoAttackLocalId = self.autoAttackAdjacentEnemyLocalId(decision.actionSpace)
+        if autoAttackLocalId is not None:
+            return ActionChoice(local_id=autoAttackLocalId)
         return self.qLearning.chooseAction(decision)
 
     def getStatus(self) -> BotStatus:

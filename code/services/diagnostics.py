@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from threading import Lock
 from typing import Any, Callable
+import json
 
 
 @dataclass(frozen=True)
@@ -49,12 +50,25 @@ class DiagnosticsService:
         with self._lock:
             self._events.append(event)
             subscribers = list(self._subscribers)
+        self._print_event(event)
         for callback in subscribers:
             try:
                 callback(event)
             except Exception:
                 continue
         return event
+
+    @staticmethod
+    def _print_event(event: DiagnosticEvent) -> None:
+        context = (
+            " " + json.dumps(event.context, sort_keys=True, default=str)
+            if event.context
+            else ""
+        )
+        print(
+            f"[{event.timestamp_utc}] [{event.level}] [{event.source}] {event.message}{context}",
+            flush=True,
+        )
 
     def debug(self, source: str, message: str, **context: Any) -> DiagnosticEvent:
         return self.log("debug", source, message, **context)

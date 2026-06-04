@@ -3,6 +3,7 @@ import json
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from pathfinding import Pathfinding
+from environment.entities import normalize_enemy_behavior
 
 
 class MazeBuilderFrame(tk.Frame):
@@ -102,7 +103,7 @@ class MazeBuilderFrame(tk.Frame):
         ttk.Combobox(
             tools,
             textvariable=self._enemyBehaviorVar,
-            values=["stationary", "chase", "patrol", "random"],
+            values=["stationary", "chase"],
             state="readonly",
             width=11,
         ).pack(side=tk.LEFT, padx=4)
@@ -389,7 +390,7 @@ class MazeBuilderFrame(tk.Frame):
             self.canvas.create_rectangle(ex * cw, ey * ch, (ex + 1) * cw, (ey + 1) * ch, fill="#22c55e", outline="")
 
         # Draw entities (enemies)
-        _KIND_COLOR = {"chase": "#dc2626", "patrol": "#7c3aed", "random": "#0891b2"}
+        _KIND_COLOR = {"stationary": "#6b7280", "chase": "#dc2626"}
         for entity in self.entities:
             if entity.get("type") != "enemy":
                 continue
@@ -399,7 +400,7 @@ class MazeBuilderFrame(tk.Frame):
             ey2, ex2 = int(pos[0]), int(pos[1])
             if not (0 <= ey2 < h and 0 <= ex2 < w):
                 continue
-            kind = entity.get("behavior", {}).get("kind", "stationary") if isinstance(entity.get("behavior"), dict) else "stationary"
+            kind = normalize_enemy_behavior(entity.get("behavior", {"kind": "stationary"})).get("kind", "stationary")
             color = _KIND_COLOR.get(kind, "#ea580c")
             self.canvas.create_rectangle(
                 ex2 * cw + 2, ey2 * ch + 2, (ex2 + 1) * cw - 2, (ey2 + 1) * ch - 2,
@@ -608,7 +609,7 @@ class MazeBuilderFrame(tk.Frame):
                 self.entities = [e for e in self.entities if e.get("position") != [y, x]]
                 self.entities.append({
                     "type": "enemy", "position": [y, x], "damage": 20.0, "alive": True,
-                    "behavior": {"kind": self._enemyBehaviorVar.get()},
+                    "behavior": normalize_enemy_behavior({"kind": self._enemyBehaviorVar.get()}),
                 })
         elif action == "remove_enemy":
             self.entities = [e for e in self.entities if e.get("position") != [y, x]]

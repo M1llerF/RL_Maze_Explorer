@@ -4,6 +4,7 @@ from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from bots.bot_status import BotStatus
+    from bots.common.decision import LocalActionSpace
 
 
 class BaseBot:
@@ -50,6 +51,33 @@ class BaseBot:
     def tickPushCooldown(self) -> None:
         if self._pushCooldownRemaining > 0:
             self._pushCooldownRemaining -= 1
+
+    def autoAttackAdjacentEnemyLocalId(self, actionSpace: "LocalActionSpace") -> int | None:
+        if not bool(getattr(self.config, "autoAttackAdjacentEnemy", False)):
+            return None
+        if not bool(getattr(self.config, "useAttackActions", False)):
+            return None
+        context = getattr(self, "_context", None)
+        if context is None:
+            return None
+
+        from bots.common.actions import ATTACK_UP, ATTACK_DOWN, ATTACK_LEFT, ATTACK_RIGHT, DIRECTION_DELTAS
+        from environment.entities import Enemy
+
+        attackDirections = (ATTACK_UP, ATTACK_DOWN, ATTACK_LEFT, ATTACK_RIGHT)
+        for semanticId in attackDirections:
+            localId = actionSpace.localId(semanticId)
+            if localId is None:
+                continue
+            if not bool(actionSpace.validActionMask[localId]):
+                continue
+            dr, dc = DIRECTION_DELTAS[int(semanticId)]
+            target = (int(self.position[0]) + dr, int(self.position[1]) + dc)
+            occupants = getattr(context, "entitiesAt", lambda _target: [])(target)
+            for entity in occupants:
+                if isinstance(entity, Enemy) and bool(getattr(entity, "_alive", True)):
+                    return int(localId)
+        return None
 
     def reset(self) -> None:
         raise NotImplementedError("This method should be implemented by subclasses.")

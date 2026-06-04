@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from environment.entities import normalize_enemy_behavior
 from services.repository import ArtifactsRepository, HeatmapData
 
 
@@ -206,8 +207,7 @@ class VisualizationService:
             if not isinstance(raw_pos, (list, tuple)) or len(raw_pos) != 2:
                 continue
             position = (int(raw_pos[0]), int(raw_pos[1]))
-            behavior = entry.get("behavior") or {}
-            kind = str(behavior.get("kind", "stationary")) if isinstance(behavior, dict) else "stationary"
+            kind = str(normalize_enemy_behavior(entry.get("behavior", {"kind": "stationary"})).get("kind", "stationary"))
             alive = bool(entry.get("alive", True))
             result.append(EnemyRenderState(position=position, behavior_kind=kind, alive=alive))
         return tuple(result)
