@@ -6,7 +6,69 @@ from typing import Any
 from botConfigs import botConfigs, buildConfigForBotType
 from rewardSystem import RewardConfig
 from botProfile import BotProfile
+from ui.event_bus import PROFILE_SAVED
 from ui.scrollable import VerticalScrolledFrame
+
+
+class HoverTooltip:
+    def __init__(self, root: tk.Misc) -> None:
+        self._root = root
+        self._tipWindow: tk.Toplevel | None = None
+        self._afterId: str | None = None
+        self._activeWidget: tk.Widget | None = None
+
+    def bind(self, widget: tk.Widget, text: str) -> None:
+        if not text.strip():
+            return
+        widget.bind("<Enter>", lambda _event, w=widget, t=text: self._schedule(w, t), add="+")
+        widget.bind("<Leave>", lambda _event: self.hide(), add="+")
+        widget.bind("<ButtonPress>", lambda _event: self.hide(), add="+")
+
+    def _schedule(self, widget: tk.Widget, text: str) -> None:
+        self.hide()
+        self._activeWidget = widget
+        self._afterId = self._root.after(350, lambda: self._show(widget, text))
+
+    def _show(self, widget: tk.Widget, text: str) -> None:
+        self.hide()
+        if not widget.winfo_exists():
+            return
+        self._activeWidget = widget
+        tip = tk.Toplevel(widget)
+        tip.wm_overrideredirect(True)
+        tip.attributes("-topmost", True)
+        label = tk.Label(
+            tip,
+            text=text,
+            justify=tk.LEFT,
+            bg="#fff8dc",
+            fg="#222222",
+            relief="solid",
+            borderwidth=1,
+            padx=8,
+            pady=6,
+            wraplength=320,
+        )
+        label.pack()
+        x = widget.winfo_rootx() + widget.winfo_width() + 12
+        y = widget.winfo_rooty() - 2
+        tip.wm_geometry(f"+{x}+{y}")
+        self._tipWindow = tip
+
+    def hide(self) -> None:
+        if self._afterId is not None:
+            try:
+                self._root.after_cancel(self._afterId)
+            except Exception:
+                pass
+            self._afterId = None
+        if self._tipWindow is not None:
+            try:
+                self._tipWindow.destroy()
+            except Exception:
+                pass
+            self._tipWindow = None
+        self._activeWidget = None
 
 
 class CreateEditProfileFrame(tk.Frame):
@@ -20,9 +82,11 @@ class CreateEditProfileFrame(tk.Frame):
         self.paramEntries: dict[str, Any] = {}
         self.rewardEntries: dict[str, Any] = {}
         self.profile: BotProfile | None = None
+        self._tooltip = HoverTooltip(self)
         try:
             self._style = ttk.Style()
             self._style.configure("Error.TEntry", fieldbackground="#ffecec")
+            self._style.configure("HelpIcon.TLabel", foreground="#1f5aa6")
         except Exception:
             self._style = None
 
@@ -49,38 +113,25 @@ class CreateEditProfileFrame(tk.Frame):
         self.configFrame = ttk.Frame(content)
         self.configFrame.pack(fill="both", expand=True, pady=10)
 
-    def _targetTab(self, paramKey: str, tabs: dict[str, Any]) -> Any:
-        key = str(paramKey)
-        if key in {"useRichEncoding", "usePositionInState", "neuralMapWidth", "neuralMapHeight", "neuralMapPoolSize"}:
-            return tabs["encoding"]
-        if key in {
-            "replayWarmupSteps",
-            "immediateReversalPenalty",
-            "repeatVisitPenaltyScale",
-            "noProgressPenalty",
-            "noProgressPatienceFactor",
-            "minNoProgressSteps",
-            "maxNoProgressSteps",
-        }:
-            return tabs["warmup"]
-        if key in {
-            "learningRate",
-            "discountFactor",
-            "epsilonStart",
-            "epsilonEnd",
-            "epsilonDecaySteps",
-            "replayCapacity",
-            "batchSize",
-            "trainFrequency",
-            "targetUpdateFrequency",
-            "hiddenSize",
-            "maxStepsPerEpisode",
-            "rewardClipMin",
-            "rewardClipMax",
-            "diagnosticsFrequency",
-        }:
-            return tabs["core"]
-        return tabs["general"]
+    @staticmethod
+    def _specTabs(config: dict[str, Any]) -> list[dict[str, str]]:
+        rawTabs = config.get("tabs")
+        tabs: list[dict[str, str]] = []
+        if isinstance(rawTabs, list):
+            for item in rawTabs:
+                if not isinstance(item, dict):
+                    continue
+                key = str(item.get("key", "")).strip()
+                label = str(item.get("label", "")).strip()
+                if key and label:
+                    tabs.append({"key": key, "label": label})
+        if tabs:
+            return tabs
+        return [{"key": "general", "label": "General"}, {"key": "rewards", "label": "Rewards"}]
+
+    @staticmethod
+    def _normalizePenaltyValue(value: float) -> float:
+        return 0.0 if value == 0 else -abs(float(value))
 
     # ----- UI building -----
     def updateBotConfigUi(self, event: Any = None) -> None:
@@ -97,52 +148,102 @@ class CreateEditProfileFrame(tk.Frame):
         if botType not in botConfigs:
             return
         config = botConfigs[botType]
+        paramHelp = dict(config.get("paramHelp", {})) if isinstance(config.get("paramHelp"), dict) else {}
+        rewardHelp = dict(config.get("rewardHelp", {})) if isinstance(config.get("rewardHelp"), dict) else {}
+        paramTabs = dict(config.get("paramTabs", {})) if isinstance(config.get("paramTabs"), dict) else {}
+        rewardLabels = dict(config.get("rewardLabels", {})) if isinstance(config.get("rewardLabels"), dict) else {}
 
         notebook = ttk.Notebook(self.configFrame)
         notebook.pack(fill="both", expand=True, padx=8, pady=8)
-        tabs = {
-            "general": ttk.Frame(notebook),
-            "core": ttk.Frame(notebook),
-            "encoding": ttk.Frame(notebook),
-            "warmup": ttk.Frame(notebook),
-            "rewards": ttk.Frame(notebook),
-        }
-        notebook.add(tabs["general"], text="General")
-        notebook.add(tabs["core"], text="DQN Core")
-        notebook.add(tabs["encoding"], text="Encoding")
-        notebook.add(tabs["warmup"], text="Warmup/Planner")
-        notebook.add(tabs["rewards"], text="Rewards")
+        tabs: dict[str, ttk.Frame] = {}
+        for tabSpec in self._specTabs(config):
+            frame = ttk.Frame(notebook)
+            tabs[tabSpec["key"]] = frame
+            notebook.add(frame, text=tabSpec["label"])
         self.currentConfigWidgets.extend([notebook, *tabs.values()])
+        generalTab = next(iter(tabs.values()))
+        paramRows: dict[str, tk.Widget] = {}
+        rewardRows: dict[str, tk.Widget] = {}
 
         if "params" in config:
             for paramName, paramKey in config["params"].items():
-                host = self._targetTab(paramKey, tabs)
+                host = tabs.get(str(paramTabs.get(paramKey, "general")), generalTab)
                 row = ttk.Frame(host)
                 row.pack(fill="x", pady=2, padx=8)
                 label = ttk.Label(row, text=f"{paramName}:")
                 label.pack(side=tk.LEFT)
+                helpText = str(paramHelp.get(paramKey, "")).strip()
+                if helpText:
+                    helpLabel = ttk.Label(row, text=" (?)", style="HelpIcon.TLabel", cursor="hand2")
+                    helpLabel.pack(side=tk.LEFT)
+                    self._tooltip.bind(helpLabel, helpText)
+                    self._tooltip.bind(label, helpText)
+                    self.currentConfigWidgets.append(helpLabel)
                 var = tk.StringVar()
                 entry = ttk.Entry(row, textvariable=var, width=14)
                 entry.pack(side=tk.LEFT, padx=6)
                 self.currentConfigWidgets.extend([row, label, entry])
+                paramRows[str(paramKey)] = row
                 self.paramVars[paramKey] = var
                 self.paramEntries[paramKey] = entry
 
-        if "rewards" in config:
-            header = ttk.Label(tabs["rewards"], text="Reward Configuration:")
-            header.pack(anchor="w", padx=8, pady=(2, 6))
-            self.currentConfigWidgets.append(header)
+        rewardsTab = tabs.get("rewards")
+        if "rewards" in config and rewardsTab is not None:
             for rewardKey, defaultValue in config["rewards"].items():
-                row = ttk.Frame(tabs["rewards"])
+                row = ttk.Frame(rewardsTab)
                 row.pack(fill="x", padx=8, pady=2)
-                rewardLabel = ttk.Label(row, text=f"{rewardKey}:")
+                rewardLabelText = str(rewardLabels.get(rewardKey, rewardKey))
+                rewardLabel = ttk.Label(row, text=f"{rewardLabelText}:")
                 rewardLabel.pack(side=tk.LEFT)
+                helpText = str(rewardHelp.get(rewardKey, "")).strip()
+                if helpText:
+                    helpLabel = ttk.Label(row, text=" (?)", style="HelpIcon.TLabel", cursor="hand2")
+                    helpLabel.pack(side=tk.LEFT)
+                    self._tooltip.bind(helpLabel, helpText)
+                    self._tooltip.bind(rewardLabel, helpText)
+                    self.currentConfigWidgets.append(helpLabel)
                 var = tk.StringVar(value=defaultValue)
                 rewardEntry = ttk.Entry(row, textvariable=var, width=14)
                 rewardEntry.pack(side=tk.LEFT, padx=6)
                 self.currentConfigWidgets.extend([row, rewardLabel, rewardEntry])
+                rewardRows[str(rewardKey)] = row
                 self.rewardVars[rewardKey] = var
                 self.rewardEntries[rewardKey] = rewardEntry
+            self._layoutRewardTab(rewardsTab, config, paramRows, rewardRows)
+
+    def _layoutRewardTab(
+        self,
+        rewardsTab: tk.Widget,
+        config: dict[str, Any],
+        paramRows: dict[str, tk.Widget],
+        rewardRows: dict[str, tk.Widget],
+    ) -> None:
+        sectionSpecs = config.get("rewardSections")
+        if not isinstance(sectionSpecs, list):
+            return
+
+        groupedRows = dict(paramRows)
+        groupedRows.update(rewardRows)
+
+        seenKeys: set[str] = set()
+        for sectionSpec in sectionSpecs:
+            if not isinstance(sectionSpec, dict):
+                continue
+            title = str(sectionSpec.get("title", "")).strip()
+            rawKeys = sectionSpec.get("keys", [])
+            keys = [str(key) for key in rawKeys] if isinstance(rawKeys, list) else []
+            if not title or not keys:
+                continue
+            header = ttk.Label(rewardsTab, text=title)
+            header.pack(anchor="w", padx=8, pady=(10 if seenKeys else 2, 6))
+            self.currentConfigWidgets.append(header)
+            for key in keys:
+                row = groupedRows.get(key)
+                if row is None:
+                    continue
+                seenKeys.add(key)
+                row.pack_forget()
+                row.pack(fill="x", padx=8, pady=2)
 
     # ----- Data binding -----
     def loadProfile(self, profile: Any = None) -> None:
@@ -155,7 +256,8 @@ class CreateEditProfileFrame(tk.Frame):
 
             if profile.config:
                 for paramKey, var in self.paramVars.items():
-                    var.set(getattr(profile.config, paramKey, ""))
+                    value = getattr(profile.config, paramKey, "")
+                    var.set("" if value is None else value)
 
             if profile.rewardConfig:
                 for rewardKey, var in self.rewardVars.items():
@@ -242,6 +344,25 @@ class CreateEditProfileFrame(tk.Frame):
             messagebox.showerror("Invalid Values", msg + "\n\nPlease fix these fields and try saving again.")
             return
 
+        rewardClipKeys = ("rewardClipMin", "rewardClipMax")
+        clipValues = [botParams.get(key) for key in rewardClipKeys]
+        if any(value is None for value in clipValues) and any(value is not None for value in clipValues):
+            messagebox.showerror(
+                "Invalid Reward Clip",
+                "Reward Clip Min and Reward Clip Max must both be filled in or both left blank.",
+            )
+            return
+
+        negativeParams = set(botConfigs.get(botType, {}).get("negativeParams", []))
+        negativeRewards = set(botConfigs.get(botType, {}).get("negativeRewards", []))
+        for key in negativeParams:
+            value = botParams.get(key)
+            if value is not None:
+                botParams[key] = self._normalizePenaltyValue(value)
+        for key in negativeRewards:
+            if key in rewardsConfig:
+                rewardsConfig[key] = self._normalizePenaltyValue(rewardsConfig[key])
+
         rawConfig = {k: v for k, v in botParams.items() if v is not None}
         botConfig = buildConfigForBotType(botType, rawConfig)
 
@@ -254,15 +375,8 @@ class CreateEditProfileFrame(tk.Frame):
             messagebox.showerror("Error", f"Failed to save profile: {e}")
             return
 
-        try:
-            self.controller.gameEnv.repository.ensureMazeFile(profileName)
-        except Exception:
-            pass
-
         messagebox.showinfo("Profile Saved", "Profile has been saved.")
-        self.controller.frames["ProfileManagementFrame"].loadProfiles()
-        self.controller.frames["VisualizationFrame"].loadProfiles()
-        self.controller.frames["BotTrainingFrame"].loadProfiles()
+        self.controller.eventBus.emit(PROFILE_SAVED, profileName=profileName)
         self.controller.showProfileManagement()
 
     def cancel(self) -> None:

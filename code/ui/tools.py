@@ -30,6 +30,7 @@ class EraseTool(BaseTool):
 
     def apply(self, frame: Any, y: int, x: int) -> None:
         frame.gridData[y][x] = 0
+        frame.entities = [e for e in frame.entities if e.get("position") != [y, x]]
 
 
 class StartTool(BaseTool):
@@ -48,8 +49,32 @@ class EndTool(BaseTool):
             frame.end = (y, x)
 
 
+class EnemyTool(BaseTool):
+    name = "Enemy"
+
+    def apply(self, frame: Any, y: int, x: int) -> None:
+        if frame.gridData[y][x] != 0:
+            return
+        if (y, x) == tuple(frame.start) or (y, x) == tuple(frame.end):
+            return
+        existing = [e for e in frame.entities if e.get("position") == [y, x]]
+        if existing:
+            # Toggle off — remove enemy at this cell
+            frame.entities = [e for e in frame.entities if e.get("position") != [y, x]]
+        else:
+            behavior_var = getattr(frame, "_enemyBehaviorVar", None)
+            kind = behavior_var.get() if behavior_var is not None else "stationary"
+            frame.entities = list(frame.entities) + [{
+                "type": "enemy",
+                "position": [y, x],
+                "damage": 20.0,
+                "alive": True,
+                "behavior": {"kind": kind},
+            }]
+
+
 def _buildRegistry() -> Dict[str, BaseTool]:
-    tools = [WallTool(), PathTool(), EraseTool(), StartTool(), EndTool()]
+    tools = [WallTool(), PathTool(), EraseTool(), StartTool(), EndTool(), EnemyTool()]
     return {t.name: t for t in tools}
 
 

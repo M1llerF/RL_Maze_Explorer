@@ -14,16 +14,25 @@ class CheckpointMeta:
     stateSchemaVersion: int
     encoderConfigFingerprint: str
     inputDim: int
+    actionDim: int = 0
+    policyMode: str = "flat"
 
 
 class CheckpointIO:
     ARTIFACT_NAME = "dqn_model.pt"
-    PAYLOAD_VERSION = 3
+    PAYLOAD_VERSION = 4
 
-    def __init__(self, repo: ArtifactsRepository, profileName: str, device: torch.device) -> None:
+    def __init__(
+        self,
+        repo: ArtifactsRepository,
+        profileName: str,
+        device: torch.device,
+        artifactName: str | None = None,
+    ) -> None:
         self.repo = repo
         self.profileName = profileName
         self.device = device
+        self.artifactName = artifactName or self.ARTIFACT_NAME
 
     def save(
         self,
@@ -35,6 +44,7 @@ class CheckpointIO:
         episodeCount: int,
         meta: CheckpointMeta,
         replayState: dict[str, Any] | None = None,
+        extraState: dict[str, Any] | None = None,
     ) -> None:
         payload = {
             "version": self.PAYLOAD_VERSION,
@@ -47,30 +57,44 @@ class CheckpointIO:
                 "state_schema_version": int(meta.stateSchemaVersion),
                 "encoder_fingerprint": str(meta.encoderConfigFingerprint),
                 "input_dim": int(meta.inputDim),
+                "action_dim": int(meta.actionDim),
+                "policy_mode": str(meta.policyMode),
             },
             "replay": replayState,
+            "extra": extraState,
         }
         buffer = io.BytesIO()
         torch.save(payload, buffer)
-        self.repo.saveModelArtifactBytes(self.profileName, self.ARTIFACT_NAME, buffer.getvalue())
+        self.repo.saveModelArtifactBytes(self.profileName, self.artifactName, buffer.getvalue())
 
     def load(self, expectedMeta: CheckpointMeta) -> dict[str, Any] | None:
         checkpoint, _ = self.loadWithReason(expectedMeta)
         return checkpoint
 
-    def loadWithReason(self, expectedMeta: CheckpointMeta) -> tuple[dict[str, Any] | None, str]:
-        raw = self.repo.loadModelArtifactBytes(self.profileName, self.ARTIFACT_NAME)
+    def loadRaw(self) -> dict[str, Any] | None:
+        raw = self.repo.loadModelArtifactBytes(self.profileName, self.artifactName)
         if raw is None:
-            return None, "checkpoint_missing"
+            return None
         try:
             checkpoint = torch.load(io.BytesIO(raw), map_location=self.device)
             if int(checkpoint.get("version", 0)) != self.PAYLOAD_VERSION:
-                return None, "payload_version_mismatch"
+                return None
+            return checkpoint
+        except Exception:
+            return None
+
+    def loadWithReason(self, expectedMeta: CheckpointMeta) -> tuple[dict[str, Any] | None, str]:
+        checkpoint = self.loadRaw()
+        if checkpoint is None:
+            return None, "checkpoint_missing"
+        try:
             meta = checkpoint.get("meta", {})
             loadedMeta = CheckpointMeta(
                 stateSchemaVersion=int(meta.get("state_schema_version", -1)),
                 encoderConfigFingerprint=str(meta.get("encoder_fingerprint", "")),
                 inputDim=int(meta.get("input_dim", -1)),
+                actionDim=int(meta.get("action_dim", 0)),
+                policyMode=str(meta.get("policy_mode", "flat")),
             )
             if loadedMeta != expectedMeta:
                 # Backward-compatible restore:
@@ -80,6 +104,8 @@ class CheckpointIO:
                 if (
                     loadedMeta.stateSchemaVersion == expectedMeta.stateSchemaVersion
                     and loadedMeta.inputDim == expectedMeta.inputDim
+                    and loadedMeta.actionDim == expectedMeta.actionDim
+                    and loadedMeta.policyMode == expectedMeta.policyMode
                 ):
                     return checkpoint, "ok_compat_fingerprint"
                 return None, (

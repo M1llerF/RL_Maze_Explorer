@@ -9,6 +9,8 @@ import numpy as np
 
 from displayTools import DisplayTools
 from rewardGrapher import RewardGrapher
+from services.visualization_service import VisualizationSnapshot, VisualizationService
+from ui.event_bus import PROFILE_SAVED, PROFILE_DELETED
 from visualizationStrategy import DefaultVisualizationStrategy
 
 
@@ -18,6 +20,7 @@ class VisualizationWindow(tk.Toplevel):
         self.gameEnv = gameEnv
         self.profileName = profileName
         self.profileIndex = profileIndex
+        self._visualizationService = VisualizationService(self.gameEnv.repository)
         self.title("Maze Visualization")
         self.geometry("600x600")
 
@@ -31,78 +34,102 @@ class VisualizationWindow(tk.Toplevel):
         controls = tk.Frame(self)
         controls.pack(pady=5)
         tk.Label(controls, text="Steps per frame:").pack(side=tk.LEFT)
-        self.stepsVar = tk.IntVar(value=20)
+        # Default to one simulation step per frame so enemy movement is visible.
+        self.stepsVar = tk.IntVar(value=1)
         self.stepsScale = tk.Scale(controls, from_=1, to=200, orient=tk.HORIZONTAL, variable=self.stepsVar, length=200)
         self.stepsScale.pack(side=tk.LEFT, padx=5)
+        self.debugVar = tk.BooleanVar(value=False)
+        self.debugCheck = ttk.Checkbutton(
+            controls,
+            text="Debug Prints",
+            variable=self.debugVar,
+            command=self._applyDebugToggle,
+        )
+        self.debugCheck.pack(side=tk.LEFT, padx=5)
         self.paused = False
         self.pauseBtn = ttk.Button(controls, text="Pause", command=self.togglePause)
         self.pauseBtn.pack(side=tk.LEFT, padx=5)
 
         self.afterId = None
         self.visualize = True
+        self._attackFlashes: dict[tuple[int, int], int] = {}
         self.protocol("WM_DELETE_WINDOW", self.onClose)
 
         try:
             self.gameEnv.pauseTrainingFor(self.profileName)
         except Exception:
             pass
+        self._applyDebugToggle()
+        self._subscribeAttackEvents()
 
         self.updateVisualization()
 
     def updateVisualization(self) -> None:
         if not self.visualize:
             return
-        self.canvas.delete("all")
         bot = self.gameEnv.bots[self.profileIndex]
         if not self.paused:
             try:
                 finished = bot.stepVisualization(maxSteps=self.stepsVar.get())
                 if finished:
                     self.gameEnv.resetEnvironment(self.profileIndex)
-            except AttributeError:
+            except Exception:
                 pass
-        botPosition = bot.position
-        self.displayWithBotAndHeatmap(botPosition, bot.statistics.getVisitedPositions())
+        snapshot = self._visualizationService.build_snapshot(self.profileName, bot)
+        self.renderVisualizationSnapshot(snapshot)
         self.afterId = self.after(100, self.updateVisualization)
+
+    def _subscribeAttackEvents(self) -> None:
+        try:
+            from environment.context import ENEMY_KILLED
+            bot = self.gameEnv.bots[self.profileIndex]
+            context = getattr(bot, "_context", None)
+            if context is not None:
+                context.on(ENEMY_KILLED, lambda **p: self._onEnemyKilled(p))
+        except Exception:
+            pass
+
+    def _onEnemyKilled(self, payload: dict) -> None:
+        pos = payload.get("position")
+        if isinstance(pos, (tuple, list)) and len(pos) == 2:
+            self._attackFlashes[(int(pos[0]), int(pos[1]))] = 5
 
     def togglePause(self) -> None:
         self.paused = not self.paused
         self.pauseBtn.configure(text="Resume" if self.paused else "Pause")
 
-    def displayWithBot(self, botPosition: tuple[int, int]) -> None:
-        maze = self.gameEnv.maze
-        cellWidth = self.canvas.winfo_width() / maze.width
-        cellHeight = self.canvas.winfo_height() / maze.height
-        for y in range(maze.height):
-            for x in range(maze.width):
-                if maze.grid[y][x] == 1:
-                    self.canvas.create_rectangle(x * cellWidth, y * cellHeight,
-                                                 (x + 1) * cellWidth, (y + 1) * cellHeight,
-                                                 fill="black")
-        start = maze.getStart()
-        end = maze.end
-        self.canvas.create_rectangle(start[1] * cellWidth, start[0] * cellHeight,
-                                     (start[1] + 1) * cellWidth, (start[0] + 1) * cellHeight,
-                                     fill="blue")
-        self.canvas.create_rectangle(end[1] * cellWidth, end[0] * cellHeight,
-                                     (end[1] + 1) * cellWidth, (end[0] + 1) * cellHeight,
-                                     fill="green")
-        self.canvas.create_oval(botPosition[1] * cellWidth, botPosition[0] * cellHeight,
-                                (botPosition[1] + 1) * cellWidth, (botPosition[0] + 1) * cellHeight,
-                                fill="red")
+    def _applyDebugToggle(self) -> None:
+        try:
+            bot = self.gameEnv.bots[self.profileIndex]
+        except Exception:
+            return
+        setter = getattr(bot, "setVisualizationDebug", None)
+        if callable(setter):
+            try:
+                setter(bool(self.debugVar.get()))
+            except Exception:
+                pass
 
-    def displayWithBotAndHeatmap(self, botPosition: tuple[int, int], visitedPositions: dict[tuple[int, int], int]) -> None:
-        maze = self.gameEnv.maze
-        cellWidth = self.canvas.winfo_width() / maze.width
-        cellHeight = self.canvas.winfo_height() / maze.height
-        heatmap = np.zeros((maze.height, maze.width))
-        for (x, y), count in visitedPositions.items():
-            heatmap[x, y] = count
+    def renderVisualizationSnapshot(self, snapshot: VisualizationSnapshot) -> None:
+        self.canvas.delete("all")
+        if snapshot.maze_grid is None or snapshot.bot_position is None:
+            return
+        grid = snapshot.maze_grid
+        height = len(grid)
+        width = len(grid[0]) if height else 0
+        if height <= 0 or width <= 0:
+            return
+        cellWidth = self.canvas.winfo_width() / width
+        cellHeight = self.canvas.winfo_height() / height
+        heatmap = np.zeros((height, width))
+        for (row, col), count in (snapshot.heatmap_data or {}).items():
+            if 0 <= row < height and 0 <= col < width:
+                heatmap[row, col] = count
         maxHeat = heatmap.max() if heatmap.max() > 0 else 1
         cmap = plt.get_cmap("Reds")
-        for y in range(maze.height):
-            for x in range(maze.width):
-                if maze.grid[y][x] == 1:
+        for y in range(height):
+            for x in range(width):
+                if grid[y][x] == 1:
                     self.canvas.create_rectangle(x * cellWidth, y * cellHeight,
                                                  (x + 1) * cellWidth, (y + 1) * cellHeight,
                                                  fill="black")
@@ -113,14 +140,58 @@ class VisualizationWindow(tk.Toplevel):
                         self.canvas.create_rectangle(x * cellWidth, y * cellHeight,
                                                      (x + 1) * cellWidth, (y + 1) * cellHeight,
                                                      fill=color, outline=color)
-        start = maze.getStart()
-        end = maze.end
-        self.canvas.create_rectangle(start[1] * cellWidth, start[0] * cellHeight,
-                                     (start[1] + 1) * cellWidth, (start[0] + 1) * cellHeight,
-                                     fill="blue")
-        self.canvas.create_rectangle(end[1] * cellWidth, end[0] * cellHeight,
-                                     (end[1] + 1) * cellWidth, (end[0] + 1) * cellHeight,
-                                     fill="green")
+        for row, col in snapshot.path or []:
+            self.canvas.create_rectangle(
+                col * cellWidth,
+                row * cellHeight,
+                (col + 1) * cellWidth,
+                (row + 1) * cellHeight,
+                outline="#f4b400",
+                width=2,
+            )
+        if snapshot.maze_start is not None:
+            start = snapshot.maze_start
+            self.canvas.create_rectangle(start[1] * cellWidth, start[0] * cellHeight,
+                                         (start[1] + 1) * cellWidth, (start[0] + 1) * cellHeight,
+                                         fill="blue")
+        if snapshot.maze_end is not None:
+            end = snapshot.maze_end
+            self.canvas.create_rectangle(end[1] * cellWidth, end[0] * cellHeight,
+                                         (end[1] + 1) * cellWidth, (end[0] + 1) * cellHeight,
+                                         fill="green")
+        for enemy in snapshot.enemies:
+            er, ec = enemy.position
+            x0, y0 = ec * cellWidth, er * cellHeight
+            x1, y1 = (ec + 1) * cellWidth, (er + 1) * cellHeight
+            if enemy.alive:
+                self.canvas.create_rectangle(x0, y0, x1, y1, fill="#e65100", outline="#bf360c", width=2)
+                label = enemy.behavior_kind[0].upper()
+                self.canvas.create_text(
+                    (x0 + x1) / 2, (y0 + y1) / 2,
+                    text=label, fill="white", font=("TkDefaultFont", max(6, int(min(cellWidth, cellHeight) * 0.45))),
+                )
+            else:
+                self.canvas.create_rectangle(x0, y0, x1, y1, fill="#616161", outline="#424242")
+        # Attack flash: bright burst at killed-enemy positions, decays over 5 frames
+        expired = [pos for pos, ttl in self._attackFlashes.items() if ttl <= 0]
+        for pos in expired:
+            del self._attackFlashes[pos]
+        for (fr, fc), ttl in list(self._attackFlashes.items()):
+            intensity = ttl / 5.0
+            x0, y0 = fc * cellWidth, fr * cellHeight
+            x1, y1 = (fc + 1) * cellWidth, (fr + 1) * cellHeight
+            pad = max(1.0, min(cellWidth, cellHeight) * 0.08 * (1.0 - intensity))
+            self.canvas.create_oval(
+                x0 + pad, y0 + pad, x1 - pad, y1 - pad,
+                fill="#ffeb3b", outline="#ff6f00", width=max(1, int(2 * intensity)),
+            )
+            cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+            arm = min(cellWidth, cellHeight) * 0.35 * intensity
+            self.canvas.create_line(cx - arm, cy, cx + arm, cy, fill="white", width=max(1, int(2 * intensity)))
+            self.canvas.create_line(cx, cy - arm, cx, cy + arm, fill="white", width=max(1, int(2 * intensity)))
+            self._attackFlashes[(fr, fc)] -= 1
+
+        botPosition = snapshot.bot_position
         self.canvas.create_oval(botPosition[1] * cellWidth, botPosition[0] * cellHeight,
                                 (botPosition[1] + 1) * cellWidth, (botPosition[0] + 1) * cellHeight,
                                 fill="red")
@@ -129,6 +200,13 @@ class VisualizationWindow(tk.Toplevel):
         self.visualize = False
         if self.afterId is not None:
             self.after_cancel(self.afterId)
+        try:
+            bot = self.gameEnv.bots[self.profileIndex]
+            setter = getattr(bot, "setVisualizationDebug", None)
+            if callable(setter):
+                setter(False)
+        except Exception:
+            pass
         try:
             self.gameEnv.resumeTrainingFor(self.profileName)
         except Exception:
@@ -147,6 +225,7 @@ class VisualizationFrame(tk.Frame):
         super().__init__(parent)
         self.controller = controller
         self._visualizationStrategy = DefaultVisualizationStrategy()
+        self._visualizationService = VisualizationService(self.controller.gameEnv.repository)
         self.canvasAgg: Any = None
 
         ttk.Label(self, text="Visualizations", font=("TkDefaultFont", 20)).pack(pady=10, padx=10)
@@ -200,6 +279,11 @@ class VisualizationFrame(tk.Frame):
         self.statisticsOutput.pack(pady=10)
         self.loadProfiles()
 
+        def _reloadProfiles(**_: Any) -> None:
+            self.loadProfiles()
+        controller.eventBus.subscribe(PROFILE_SAVED, _reloadProfiles)
+        controller.eventBus.subscribe(PROFILE_DELETED, _reloadProfiles)
+
     def onFrameConfigure(self, event: Any) -> None:
         self.canvas.configure(scrollregion=self.canvas.bbox("all"))
 
@@ -215,7 +299,28 @@ class VisualizationFrame(tk.Frame):
         profile = self.controller.gameEnv.profileManager.loadProfile(selectedProfile)
         profileIndex = self.controller.gameEnv.applyProfile(profile)
         bot = self.controller.gameEnv.bots[profileIndex]
-        self._visualizationStrategy.visualize(self, bot, profileIndex)
+        snapshot = self._visualizationService.build_snapshot(selectedProfile, bot)
+        self._visualizationStrategy.visualize(self, snapshot)
+
+    def renderVisualizationSnapshot(self, snapshot: VisualizationSnapshot) -> None:
+        self._renderHeatmapSnapshot(self.heatmapCanvasLatest, snapshot.latest)
+        self._renderHeatmapSnapshot(self.heatmapCanvasHighest, snapshot.highest)
+        self._renderHeatmapSnapshot(self.heatmapCanvasLowest, snapshot.lowest)
+        self.displayQtableSnapshot(snapshot)
+        self.displayStatisticsSnapshot(snapshot)
+        self.displayRewardGraphSnapshot(snapshot)
+
+    def _renderHeatmapSnapshot(self, canvas: Any, snapshot: Any) -> None:
+        if snapshot is None:
+            canvas.delete("all")
+            return
+        self.displayHeatmap(
+            canvas,
+            snapshot.maze,
+            snapshot.start,
+            snapshot.end,
+            snapshot.heatmap_data,
+        )
 
     def displayHeatmap(self, canvas: Any, maze: Any, start: Any, end: Any, heatmapData: Any) -> None:
         try:
@@ -224,49 +329,53 @@ class VisualizationFrame(tk.Frame):
             pass
 
     def displayQtable(self, bot: Any, profileIndex: int) -> None:
+        snapshot = self._visualizationService.build_snapshot(bot.profileName, bot)
+        self.displayQtableSnapshot(snapshot)
+
+    def displayQtableSnapshot(self, snapshot: VisualizationSnapshot) -> None:
         self.qtableOutput.delete("1.0", tk.END)
-        if hasattr(bot, 'qLearning') and hasattr(bot.qLearning, 'qTable'):
-            topValues = self.getTopQValues(bot, profileIndex)
+        if snapshot.q_table is not None:
+            topValues = self.getTopQValues(snapshot.q_table)
+            actionSpecs = list(snapshot.action_specs)
             self.qtableOutput.insert(tk.END, "Top Q-Table Values:\n")
             for i, (qValue, (state, actions)) in enumerate(topValues):
-                position, surrounding, stepCount = state
                 bestActionIndex = int(np.argmax(actions))
-                bestAction = self.getActionLabel(bestActionIndex)
+                bestAction = self.getActionLabel(bestActionIndex, actionSpecs)
                 bestQValue = qValue
+                rankedActions = self.formatRankedActions(actions, actionSpecs)
                 self.qtableOutput.insert(tk.END, f"Rank {i+1}:\n")
-                self.qtableOutput.insert(tk.END, f"  Current Position: {position}\n")
-                self.qtableOutput.insert(tk.END, f"  Surrounding: {surrounding}\n")
-                self.qtableOutput.insert(tk.END, f"  Step Count: {stepCount}\n")
+                self.qtableOutput.insert(tk.END, f"  State: {self.formatStateSummary(state)}\n")
                 self.qtableOutput.insert(tk.END, f"  Best Action: {bestAction}\n")
                 self.qtableOutput.insert(tk.END, f"  Best Q-value: {bestQValue}\n\n")
+                if rankedActions:
+                    self.qtableOutput.insert(tk.END, f"  Actions: {rankedActions}\n\n")
         else:
             self.qtableOutput.insert(tk.END, "No tabular Q-table available for this bot.\n")
 
     def displayStatistics(self, bot: Any, profileIndex: int) -> None:
+        snapshot = self._visualizationService.build_snapshot(bot.profileName, bot)
+        self.displayStatisticsSnapshot(snapshot)
+
+    def displayStatisticsSnapshot(self, snapshot: VisualizationSnapshot) -> None:
         self.statisticsOutput.delete("1.0", tk.END)
-        try:
-            repo = self.controller.gameEnv.repository
-            profileData = repo.readProfileStats(bot.profileName) or {}
-        except Exception:
-            profileData = {}
+        profileData = dict(snapshot.profile_stats or {})
         self.statisticsOutput.insert(tk.END, f"Total Steps: {profileData.get('total_steps', 0)}\n")
         self.statisticsOutput.insert(tk.END, f"Non-Repeating Steps: {profileData.get('non_repeating_steps_taken', 0)}\n")
         self.statisticsOutput.insert(tk.END, f"Times Revisited Squares: {profileData.get('times_revisited_squares', 0)}\n")
         self.statisticsOutput.insert(tk.END, f"Times Bot Hit Wall: {profileData.get('times_hit_wall', 0)}\n")
 
     def displayRewardGraph(self, bot: Any) -> None:
+        snapshot = self._visualizationService.build_snapshot(bot.profileName, bot)
+        self.displayRewardGraphSnapshot(snapshot)
+
+    def displayRewardGraphSnapshot(self, snapshot: VisualizationSnapshot) -> None:
         if self.canvasAgg:
             self.canvasAgg.get_tk_widget().destroy()
-        try:
-            rewardPath = self.controller.gameEnv.repository.rewardsPath(bot.profileName)
-        except Exception:
-            rewardPath = f'profiles/{bot.profileName}/SimulationRewards.txt'
-        rewardFilenames = [rewardPath]
+        rewardFilenames = [snapshot.reward_path]
         grapher = RewardGrapher(rewardFilenames)
         self.canvasAgg = grapher.run(self.rewardCanvas)
 
-    def getTopQValues(self, bot: Any, profileIndex: int, n: int = 10) -> list[Any]:
-        qTable = bot.qLearning.qTable
+    def getTopQValues(self, qTable: dict[Any, Any], n: int = 10) -> list[Any]:
         qTableItems = list(qTable.items())
         topItems = []
         for item in qTableItems:
@@ -280,6 +389,45 @@ class VisualizationFrame(tk.Frame):
                     topItems.sort(reverse=True, key=lambda item: item[0])
         return topItems
 
-    def getActionLabel(self, actionIndex: int) -> str:
-        actionLabels = ["Up", "Down", "Left", "Right"]
-        return actionLabels[actionIndex]
+    @staticmethod
+    def getActionLabel(actionIndex: int, actionSpecs: list[Any] | None = None) -> str:
+        if actionSpecs and 0 <= int(actionIndex) < len(actionSpecs):
+            spec = actionSpecs[int(actionIndex)]
+            name = str(getattr(spec, "name", f"action_{actionIndex}"))
+            kind = str(getattr(spec, "kind", "action"))
+            return f"{VisualizationFrame.humanizeActionName(name)} [{kind}]"
+        return f"Action {int(actionIndex)}"
+
+    @staticmethod
+    def humanizeActionName(name: str) -> str:
+        return name.replace("_", " ").strip().title()
+
+    @staticmethod
+    def formatRankedActions(actions: Any, actionSpecs: list[Any]) -> str:
+        try:
+            ranked = sorted(
+                enumerate(np.asarray(actions).tolist()),
+                key=lambda item: float(item[1]),
+                reverse=True,
+            )
+        except Exception:
+            return ""
+        return ", ".join(
+            f"{VisualizationFrame.getActionLabel(index, actionSpecs)}={float(value):.3f}"
+            for index, value in ranked
+        )
+
+    @staticmethod
+    def formatStateSummary(state: Any) -> str:
+        if not isinstance(state, tuple):
+            return str(state)
+        if len(state) >= 3:
+            parts = [
+                f"position={state[0]}",
+                f"walls={state[1]}",
+                f"goal={state[2]}",
+            ]
+            if len(state) > 3 and state[3]:
+                parts.append(f"entities={state[3]}")
+            return ", ".join(parts)
+        return str(state)

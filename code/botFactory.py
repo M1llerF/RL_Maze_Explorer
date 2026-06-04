@@ -1,18 +1,58 @@
 from __future__ import annotations
 
-import inspect
-from typing import Any, Protocol
+from dataclasses import dataclass, field
+from typing import Any
 
 from rewardSystem import RewardSystem, MazeSensors
+from environment.traversal import build_traversal_policy
+from services.diagnostics import DiagnosticsService
 from services.repository import ArtifactsRepository
 
 
-class BotProtocol(Protocol):
-    def initializeSpecificData(self, data: dict[str, Any]) -> None: ...
+@dataclass
+class BotCreateContext:
+    """Single stable construction contract for all bot types.
+
+    BotFactory creates one of these and passes it as the sole constructor
+    argument to every bot class. No per-bot constructor signature filtering.
+    """
+
+    maze: Any
+    config: Any
+    rewardSystem: Any
+    statistics: Any
+    profileName: str
+    repository: ArtifactsRepository
+    botSpecificData: dict[str, Any] = field(default_factory=lambda: {})
+    loadCheckpoint: bool = True
+    diagnostics: DiagnosticsService | None = None
+
+    @property
+    def reward_system(self) -> Any:
+        return self.rewardSystem
+
+    @property
+    def profile_name(self) -> str:
+        return self.profileName
+
+    @property
+    def bot_specific_data(self) -> dict[str, Any]:
+        return self.botSpecificData
+
+    @property
+    def load_checkpoint(self) -> bool:
+        return self.loadCheckpoint
+
+
 
 
 class BotFactory:
-    def __init__(self, maze: Any, repository: ArtifactsRepository | None = None) -> None:
+    def __init__(
+        self,
+        maze: Any,
+        repository: ArtifactsRepository | None = None,
+        diagnostics: DiagnosticsService | None = None,
+    ) -> None:
         """
         Initialize the BotFactory with a given maze.
         
@@ -21,6 +61,7 @@ class BotFactory:
         self.maze = maze
         self.botRegistry: dict[str, Any] = {}
         self.repository = repository or ArtifactsRepository()
+        self.diagnostics = diagnostics
 
     def registerBot(self, botType: str, botClass: Any) -> None:
         """
@@ -69,38 +110,27 @@ class BotFactory:
             raise ValueError(f"Unknown bot type: {botType}. Registered bot types: {knownMsg}")
 
         botClass = self.botRegistry[botType]
-        # Provide minimal sensors interface decoupled from BotTools
-        rewardSystem = RewardSystem(self.maze, rewardConfig, sensors=MazeSensors(self.maze))
-        # Constructor argument filtering keeps multi-bot extension straightforward
-        # without per-bot branching in the factory.
-        constructorArgs: dict[str, Any] = {
-            "maze": self.maze,
-            "config": config,
-            "rewardSystem": rewardSystem,
-            "reward_system": rewardSystem,
-            "statistics": statistics,
-            "profileName": profileName,
-            "profile_name": profileName,
-            "repository": self.repository,
-            "loadCheckpoint": loadCheckpoint,
-        }
-        signature = inspect.signature(botClass)
-        acceptsKwargs = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in signature.parameters.values())
-        if acceptsKwargs:
-            ctorKwargs = constructorArgs
-        else:
-            accepted = {
-                name
-                for name, p in signature.parameters.items()
-                if name != "self"
-                and p.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
-            }
-            ctorKwargs = {k: v for k, v in constructorArgs.items() if k in accepted}
-        botInstance = botClass(**ctorKwargs)
-        
+        traversal = build_traversal_policy(self.maze, profileName)
+        rewardSystem = RewardSystem(
+            self.maze,
+            rewardConfig,
+            sensors=MazeSensors(self.maze, traversal=traversal),
+            traversal=traversal,
+        )
+        ctx = BotCreateContext(
+            maze=self.maze,
+            config=config,
+            rewardSystem=rewardSystem,
+            statistics=statistics,
+            profileName=profileName,
+            repository=self.repository,
+            botSpecificData=botSpecificData,
+            loadCheckpoint=loadCheckpoint,
+            diagnostics=self.diagnostics,
+        )
+        botInstance = botClass(ctx)
+
         if hasattr(botInstance, 'initializeSpecificData'):
             botInstance.initializeSpecificData(botSpecificData)
-        elif hasattr(botInstance, 'initialize_specific_data'):
-            botInstance.initialize_specific_data(botSpecificData)
 
         return botInstance

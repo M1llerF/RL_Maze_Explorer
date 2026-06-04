@@ -1,9 +1,10 @@
 # pyright: reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox
 from typing import Any
 
 from displayTools import DisplayTools
+from ui.event_bus import PROFILE_SAVED, PROFILE_DELETED
 from ui.scrollable import VerticalScrolledFrame
 
 
@@ -31,8 +32,12 @@ class ProfileManagementFrame(tk.Frame):
 
         ttk.Button(content, text="Delete Profile", command=self.deleteProfile).pack(pady=10)
 
-    def onShow(self) -> None:
-        # Refresh when navigated back
+        def _reloadProfiles(**_: Any) -> None:
+            self.loadProfiles()
+        controller.eventBus.subscribe(PROFILE_SAVED, _reloadProfiles)
+        controller.eventBus.subscribe(PROFILE_DELETED, _reloadProfiles)
+
+    def on_show(self) -> None:
         self.loadProfiles()
 
     def loadProfiles(self) -> None:
@@ -52,7 +57,15 @@ class ProfileManagementFrame(tk.Frame):
         self.controller.showCreateEditProfile(profile)
 
     def deleteProfile(self) -> None:
-        DisplayTools.deleteProfile(self.controller.gameEnv.profileManager, self.profileList)
-        self.loadProfiles()
-        self.controller.frames["BotTrainingFrame"].loadProfiles()
-        self.controller.frames["VisualizationFrame"].loadProfiles()
+        selectedIndex = self.profileList.curselection()
+        if not selectedIndex:
+            messagebox.showerror("Error", "No profile selected.")
+            return
+        profileName = str(self.profileList.get(selectedIndex[0]))
+        try:
+            self.controller.gameEnv.profileService.deleteProfile(profileName)
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to delete profile '{profileName}'. Error: {e}")
+            return
+        self.profileList.delete(selectedIndex)
+        self.controller.eventBus.emit(PROFILE_DELETED, profileName=profileName)

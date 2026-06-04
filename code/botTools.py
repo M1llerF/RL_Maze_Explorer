@@ -1,14 +1,21 @@
 from pathfinding import Pathfinding
 import numpy as np
 from typing import Any, Tuple, List, Union, cast
+from environment.sensing import build_sensing_service
+from environment.traversal import build_traversal_policy
+from bots.common.actions import DIRECTION_DELTAS
+
+
 class BotTools:
-    def __init__(self, maze: Any) -> None:
+    def __init__(self, maze: Any, profileName: str | None = None) -> None:
         """
         Initialize the BotTools with a given maze.
 
         :param maze: The maze instance the tools will operate on.
         """
         self.maze = maze
+        self.traversal = build_traversal_policy(maze, profileName)
+        self.sensing = build_sensing_service(maze, profileName)
     
     def checkGoalInSight(self, position: Tuple[int, int]) -> int:
         """
@@ -17,18 +24,7 @@ class BotTools:
         :param position: The current position of the bot.
         :return: 1 if the goal is in sight, otherwise 0.
         """
-        directions = [(1, 0), (-1, 0), (0, 1), (0, -1)]
-        for dx, dy in directions:
-            currentPosition = position
-            while True:
-                newPosition = (currentPosition[0] + dx, currentPosition[1] + dy)
-                if self.maze.isValidPosition(None, newPosition[0], newPosition[1]):
-                    if newPosition == self.maze.end:
-                        return 1 # True
-                    currentPosition = newPosition
-                else:
-                    break
-        return 0 # False
+        return self.sensing.goal_in_sight(position)
 
     
     def posToState(self, position: Tuple[int, int]) -> Tuple[int, int]:
@@ -47,7 +43,7 @@ class BotTools:
         :param position: The position to check.
         :return: True if the position is valid, otherwise False.
         """
-        return self.maze.isValidPosition(None, position[0], position[1])
+        return self.traversal.is_valid_position(position)
 
     def detectWalls(self, position: Tuple[int, int]) -> Tuple[Tuple[int, int, int, int], Tuple[int, int, int, int]]:
         """
@@ -56,25 +52,7 @@ class BotTools:
         :param position: The current position of the bot.
         :return: A tuple containing distances to walls and goal directions for all four directions.
         """
-        directions = {
-            'Up': (-1, 0),
-            'Down': (1, 0),
-            'Left': (0, -1),
-            'Right': (0, 1),
-        }
-
-        wallDistances: list[int] = []
-        goalDirections: list[int] = []
-
-        for _direction, (dx, dy) in directions.items():
-            distance, goal = self._detectWallInDirection(position, dx, dy)
-            wallDistances.append(distance)
-            goalDirections.append(goal)
-
-        return (
-            cast(tuple[int, int, int, int], tuple(wallDistances)),
-            cast(tuple[int, int, int, int], tuple(goalDirections)),
-        )
+        return self.sensing.wall_distances_and_goal_directions(position)
     
     def _detectWallInDirection(self, position: Tuple[int, int], dx: int, dy: int) -> Tuple[int, int]:
         """
@@ -92,7 +70,7 @@ class BotTools:
         while True:
             nextPosition = (currentPosition[0] + dx, currentPosition[1] + dy)
 
-            if self._isWithinBounds(nextPosition) and self.maze.isValidPosition(None, nextPosition[0], nextPosition[1]):
+            if self._isWithinBounds(nextPosition) and self.traversal.is_valid_position(nextPosition):
                 currentPosition = nextPosition
                 distance += 1
                 if nextPosition == self.maze.end:
@@ -129,9 +107,8 @@ class BotTools:
         :param action: The action to be taken.
         :return: The next position of the bot.
         """
-        directionMap = {0: (-1, 0), 1: (1, 0), 2: (0, -1), 3: (0, 1)}
-        direction = directionMap[action]
-        return position[0] + direction[0], position[1] + direction[1]
+        dr, dc = DIRECTION_DELTAS[action]
+        return position[0] + dr, position[1] + dc
     
     def getOptimalPathInfo(self, start: Tuple[int, int], end: Tuple[int, int], output: str = 'path') -> Union[List[Tuple[int, int]], int]:
         """
@@ -142,7 +119,7 @@ class BotTools:
         :param output: The type of output ('path' or 'length').
         :return: The optimal path or its length.
         """
-        optimalPath = Pathfinding.aStarSearch(self.maze, start, end)
+        optimalPath = Pathfinding.aStarSearch(self.maze, start, end, traversal=self.traversal)
         if output == 'path':
             return optimalPath
         elif output == 'length':

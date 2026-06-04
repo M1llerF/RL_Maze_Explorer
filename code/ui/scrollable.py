@@ -1,6 +1,6 @@
 import tkinter as tk
 from tkinter import ttk
-from typing import Any
+from typing import Any, Callable, cast
 
 
 class VerticalScrolledFrame(ttk.Frame):
@@ -9,7 +9,10 @@ class VerticalScrolledFrame(ttk.Frame):
     def __init__(self, parent: Any, **kwargs: Any) -> None:
         super().__init__(parent, **kwargs)
         self.canvas = tk.Canvas(self, highlightthickness=0)
-        self.scrollbar = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
+        self.scrollbar = ttk.Scrollbar(
+            self, orient="vertical",
+            command=cast(Callable[..., None], self.canvas.yview),
+        )
         self.content = ttk.Frame(self.canvas)
         self._windowId = self.canvas.create_window((0, 0), window=self.content, anchor="nw")
 

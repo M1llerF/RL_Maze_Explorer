@@ -1,8 +1,6 @@
-import os
-import shutil
 import numpy as np
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk
 import matplotlib.colors as mcolors
 from matplotlib import pyplot as plt
 from typing import Any, cast
@@ -20,27 +18,6 @@ class DisplayTools:
         listbox.delete(0, tk.END)
         for profile in profiles:
             listbox.insert(tk.END, profile)
-
-    @staticmethod
-    def deleteProfile(profileManager: Any, listbox: Any) -> None:
-        selectedIndex = listbox.curselection()
-        if not selectedIndex:
-            messagebox.showerror("Error", "No profile selected.")
-            return
-
-        profileName = listbox.get(selectedIndex)
-        profileDir = f"{profileManager.profileDirectory}/{profileName}"
-
-        try:
-            if os.path.exists(profileDir):
-                shutil.rmtree(profileDir)
-            profilePkl = f"{profileManager.profileDirectory}/{profileName}.pkl"
-            if os.path.exists(profilePkl):
-                os.remove(profilePkl)
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to delete profile '{profileName}'. Error: {e}")
-        finally:
-            listbox.delete(selectedIndex)
 
     @staticmethod
     def displayHeatmap(

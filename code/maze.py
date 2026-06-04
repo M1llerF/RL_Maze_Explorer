@@ -1,6 +1,8 @@
 import numpy as np
 import random
 from typing import Any
+from environment.entities import entity_from_state, entity_to_state
+from pathfinding import Pathfinding
 
 
 MazeState = dict[str, Any]
@@ -15,6 +17,7 @@ class Maze:
         self.grid = [[0 for _ in range(width)] for _ in range(height)]
         self.start = start
         self.end = end
+        self.entities: list[dict[str, Any]] = []
         self.minimumDistance = max(width, height) // 2
         self.setupSimpleMaze()
         # Do not create a matplotlib figure here; the app uses Tk canvas.
@@ -61,49 +64,93 @@ class Maze:
         else:
             raise ValueError("Invalid goal position")
         
-    def setupSimpleMaze(self) -> None:
-        # Randomly adjust width and height
-        # self.width = random.randint(self.width, self.width + 2)
-        # self.height = random.randint(self.height, self.height + 2)
+    def setupSimpleMaze(
+        self,
+        minGenerationLength: int | None = None,
+        maxGenerationLength: int | None = None,
+    ) -> None:
+        minLength = max(0, int(minGenerationLength)) if minGenerationLength is not None else None
+        maxLength = max(0, int(maxGenerationLength)) if maxGenerationLength is not None else None
+        if minLength is not None and maxLength is not None and minLength > maxLength:
+            raise ValueError("minGenerationLength must be <= maxGenerationLength")
 
+        fallbackState: MazeState | None = None
+        fallbackDistance: int | None = None
+
+        for _ in range(100):
+            self._generateSimpleMazeTopology()
+            pathLength = len(Pathfinding.aStarSearch(self, self.start, self.end))
+            if self._matchesGenerationLength(pathLength, minLength, maxLength):
+                return
+            distance = self._generationLengthDistance(pathLength, minLength, maxLength)
+            if fallbackDistance is None or distance < fallbackDistance:
+                fallbackDistance = distance
+                fallbackState = self.getState()
+
+        if fallbackState is not None:
+            self.setState(fallbackState)
+
+    def _generateSimpleMazeTopology(self) -> None:
         # Initialize grid with walls
         self.grid = [[1 for _ in range(self.width)] for _ in range(self.height)]
+        self.entities = []
 
-        def dfsIterative(x: int, y: int, algorithmType: int) -> None:
+        def dfsIterative(x: int, y: int) -> None:
             stack = [(x, y)]
             directions = [(1, 0), (-1, 0), (0, 1), (0, -1)]
 
             while stack:
-                cx, cy = stack.pop()
-                random.shuffle(directions)
+                cx, cy = stack[-1]
+                neighbors: list[tuple[int, int, int, int]] = []
                 for dx, dy in directions:
                     nx, ny = cx + 2 * dx, cy + 2 * dy
                     if 1 <= nx < self.height - 1 and 1 <= ny < self.width - 1 and self.grid[nx][ny] == 1:
-                        self.grid[cx + dx][cy + dy] = 0
-                        self.grid[nx][ny] = 0
-                        if algorithmType == 1:
-                            stack.append((cx, cy))
-                        stack.append((nx, ny))
-                        break
+                        neighbors.append((dx, dy, nx, ny))
 
-        # Randomly choose a starting position
+                if not neighbors:
+                    stack.pop()
+                    continue
+
+                dx, dy, nx, ny = random.choice(neighbors)
+                self.grid[cx + dx][cy + dy] = 0
+                self.grid[nx][ny] = 0
+                stack.append((nx, ny))
+
         startX = random.randrange(1, self.height - 1, 2)
         startY = random.randrange(1, self.width - 1, 2)
         self.grid[startX][startY] = 0
 
-        # Randomly choose a algorithm type
-        algorithmType = random.randint(1, 2)
-        dfsIterative(startX, startY, algorithmType)
+        dfsIterative(startX, startY)
 
-        # Collect all path positions
         startPositions = [(x, y) for x in range(1, self.height - 1) for y in range(1, self.width - 1) if self.grid[x][y] == 0]
         self.start = random.choice(startPositions)
-
-        # Ensure the goal is at least minimum_distance away from the start
         self.end = self.getFarthestValidEndPosition(startPositions)
-
         self.setStart(*self.start)
         self.setGoal(*self.end)
+
+    @staticmethod
+    def _matchesGenerationLength(
+        pathLength: int,
+        minLength: int | None,
+        maxLength: int | None,
+    ) -> bool:
+        if minLength is not None and pathLength < minLength:
+            return False
+        if maxLength is not None and pathLength > maxLength:
+            return False
+        return True
+
+    @staticmethod
+    def _generationLengthDistance(
+        pathLength: int,
+        minLength: int | None,
+        maxLength: int | None,
+    ) -> int:
+        if minLength is not None and pathLength < minLength:
+            return int(minLength - pathLength)
+        if maxLength is not None and pathLength > maxLength:
+            return int(pathLength - maxLength)
+        return 0
 
     def resize(self, width: int, height: int, regenerate: bool = True) -> None:
         """Resize the maze dimensions and optionally regenerate topology."""
@@ -115,6 +162,27 @@ class Maze:
         if regenerate:
             self.setupSimpleMaze()
 
+    def setEntities(self, entities: list[dict[str, Any]]) -> None:
+        normalized: list[dict[str, Any]] = []
+        for raw in list(entities or []):
+            if not isinstance(raw, dict):
+                continue
+            entity = entity_from_state(raw)
+            row, col = entity.position
+            if not self.isValidPosition(None, row, col):
+                raise ValueError(f"Invalid entity position for maze topology: {(row, col)}")
+            if self.start is not None and (row, col) == tuple(self.start):
+                raise ValueError("Entity cannot occupy the maze start position")
+            if self.end is not None and (row, col) == tuple(self.end):
+                raise ValueError("Entity cannot occupy the maze goal position")
+            normalized.append(entity_to_state(entity))
+        self.entities = normalized
+
+    def addEntity(self, entityType: str, position: tuple[int, int], **kwargs: Any) -> None:
+        nextState = {"type": str(entityType), "position": [int(position[0]), int(position[1])]}
+        nextState.update(kwargs)
+        self.setEntities([*self.entities, nextState])
+
     def getState(self) -> MazeState:
         """Return a serializable snapshot of the current maze state."""
         return {
@@ -123,6 +191,7 @@ class Maze:
             'grid': [row[:] for row in self.grid],
             'start': tuple(self.start) if self.start is not None else None,
             'end': tuple(self.end) if self.end is not None else None,
+            'entities': [dict(entity) for entity in self.entities],
         }
 
     def setState(self, state: MazeState) -> None:
@@ -132,6 +201,8 @@ class Maze:
         self.grid = [row[:] for row in state['grid']]
         self.start = tuple(state['start']) if state['start'] is not None else None
         self.end = tuple(state['end']) if state['end'] is not None else None
+        self.entities = []
+        self.setEntities(list(state.get('entities', [])))
 
     def getFarthestValidEndPosition(self, startPositions: list[tuple[int, int]]) -> tuple[int, int]:
         """

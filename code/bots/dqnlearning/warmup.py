@@ -6,7 +6,7 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class PlannerObservationContext:
     plannerActions: tuple[int, ...]
-    validActionMask: tuple[bool, bool, bool, bool]
+    validActionMask: tuple[bool, ...]
 
 
 class PlannerWarmupPolicy:

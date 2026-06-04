@@ -37,6 +37,7 @@ class MazeBuilderFrame(tk.Frame):
         self.gridData = []            # 0=open, 1=wall
         self.start = (0, 0)
         self.end = (0, 0)
+        self.entities = []
 
         # History
         self._undoStack = []
@@ -95,6 +96,16 @@ class MazeBuilderFrame(tk.Frame):
         ttk.Label(tools, text="Tool:").pack(side=tk.LEFT, padx=(0, 8))
         for name in self.TOOLS:
             ttk.Radiobutton(tools, text=name, value=name, variable=self.toolVar).pack(side=tk.LEFT, padx=4)
+        ttk.Separator(tools, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=8)
+        ttk.Label(tools, text="Enemy behavior:").pack(side=tk.LEFT)
+        self._enemyBehaviorVar = tk.StringVar(value="stationary")
+        ttk.Combobox(
+            tools,
+            textvariable=self._enemyBehaviorVar,
+            values=["stationary", "chase", "patrol", "random"],
+            state="readonly",
+            width=11,
+        ).pack(side=tk.LEFT, padx=4)
 
         # View controls
         view = ttk.Frame(self)
@@ -154,6 +165,9 @@ class MazeBuilderFrame(tk.Frame):
         self.ctxMenu.add_separator()
         self.ctxMenu.add_command(label="Set Start", command=lambda: self._ctxAction("start"))
         self.ctxMenu.add_command(label="Set End", command=lambda: self._ctxAction("end"))
+        self.ctxMenu.add_separator()
+        self.ctxMenu.add_command(label="Place Enemy", command=lambda: self._ctxAction("place_enemy"))
+        self.ctxMenu.add_command(label="Remove Enemy", command=lambda: self._ctxAction("remove_enemy"))
 
         # Keyboard pan (hold Space)
         self.canvas.bind_all("<KeyPress-space>", self._spacePanOn)
@@ -189,6 +203,7 @@ class MazeBuilderFrame(tk.Frame):
         self.gridData = [[0 for _ in range(w)] for _ in range(h)]
         self.start = (0, 0)
         self.end = (h - 1, w - 1)
+        self.entities = []
         self._redoStack.clear()
         self._recomputePath()
         self._updateStatus()
@@ -225,6 +240,7 @@ class MazeBuilderFrame(tk.Frame):
             self.gridData = [row[:] for row in state['grid']]
             self.start = tuple(state['start']) if state['start'] else (0, 0)
             self.end = tuple(state['end']) if state['end'] else (len(self.gridData)-1, len(self.gridData[0])-1)
+            self.entities = list(state.get('entities', []))
             self._redoStack.clear()
             self._recomputePath()
             self.draw()
@@ -243,12 +259,14 @@ class MazeBuilderFrame(tk.Frame):
             grid = data['grid']
             start = tuple(data.get('start')) if data.get('start') is not None else (0, 0)
             end = tuple(data.get('end')) if data.get('end') is not None else (h - 1, w - 1)
+            entities = list(data.get('entities', []))
             self._pushHistory()
             self.widthVar.set(w)
             self.heightVar.set(h)
             self.gridData = [row[:] for row in grid]
             self.start = start
             self.end = end
+            self.entities = entities
             self._redoStack.clear()
             self._recomputePath()
             self.draw()
@@ -318,6 +336,7 @@ class MazeBuilderFrame(tk.Frame):
             self.gridData = [row[:] for row in state['grid']]
             self.start = tuple(state.get('start')) if state.get('start') is not None else (0, 0)
             self.end = tuple(state.get('end')) if state.get('end') is not None else (len(self.gridData)-1, len(self.gridData[0])-1)
+            self.entities = list(state.get('entities', []))
             self._updateStatus()
         except Exception:
             pass
@@ -330,6 +349,7 @@ class MazeBuilderFrame(tk.Frame):
             'grid': [row[:] for row in self.gridData],
             'start': list(self.start),
             'end': list(self.end),
+            'entities': list(self.entities),
         }
 
     def validateStartEnd(self, showBanner: bool = False) -> bool:
@@ -367,6 +387,30 @@ class MazeBuilderFrame(tk.Frame):
             self.canvas.create_rectangle(sx * cw, sy * ch, (sx + 1) * cw, (sy + 1) * ch, fill="#3b82f6", outline="")
         if 0 <= ey < h and 0 <= ex < w and self.gridData and self.gridData[ey][ex] == 0:
             self.canvas.create_rectangle(ex * cw, ey * ch, (ex + 1) * cw, (ey + 1) * ch, fill="#22c55e", outline="")
+
+        # Draw entities (enemies)
+        _KIND_COLOR = {"chase": "#dc2626", "patrol": "#7c3aed", "random": "#0891b2"}
+        for entity in self.entities:
+            if entity.get("type") != "enemy":
+                continue
+            pos = entity.get("position")
+            if not isinstance(pos, (list, tuple)) or len(pos) != 2:
+                continue
+            ey2, ex2 = int(pos[0]), int(pos[1])
+            if not (0 <= ey2 < h and 0 <= ex2 < w):
+                continue
+            kind = entity.get("behavior", {}).get("kind", "stationary") if isinstance(entity.get("behavior"), dict) else "stationary"
+            color = _KIND_COLOR.get(kind, "#ea580c")
+            self.canvas.create_rectangle(
+                ex2 * cw + 2, ey2 * ch + 2, (ex2 + 1) * cw - 2, (ey2 + 1) * ch - 2,
+                fill=color, outline="#1e1e1e",
+            )
+            if cw >= 14:
+                self.canvas.create_text(
+                    ex2 * cw + cw / 2, ey2 * ch + ch / 2,
+                    text=kind[0].upper(), fill="white",
+                    font=("TkDefaultFont", max(6, int(cw * 0.4))),
+                )
 
         # Live tool preview for Line/Rect
         if previewTarget and self.toolVar.get() in ("Line", "Rect") and self._dragOriginCell:
@@ -481,6 +525,7 @@ class MazeBuilderFrame(tk.Frame):
         # Right-drag erase should work regardless of selected tool
         if erase:
             self.gridData[y][x] = 0
+            self.entities = [e for e in self.entities if e.get("position") != [y, x]]
             self._recomputePath()
             return
         # Delegate to tool strategy when available
@@ -553,10 +598,20 @@ class MazeBuilderFrame(tk.Frame):
             self.gridData[y][x] = 0 if self.gridData[y][x] == 1 else 1
         elif action == "clear":
             self.gridData[y][x] = 0
+            self.entities = [e for e in self.entities if e.get("position") != [y, x]]
         elif action == "start":
             self.start = (y, x)
         elif action == "end":
             self.end = (y, x)
+        elif action == "place_enemy":
+            if self.gridData[y][x] == 0 and (y, x) != tuple(self.start) and (y, x) != tuple(self.end):
+                self.entities = [e for e in self.entities if e.get("position") != [y, x]]
+                self.entities.append({
+                    "type": "enemy", "position": [y, x], "damage": 20.0, "alive": True,
+                    "behavior": {"kind": self._enemyBehaviorVar.get()},
+                })
+        elif action == "remove_enemy":
+            self.entities = [e for e in self.entities if e.get("position") != [y, x]]
         self._redoStack.clear()
         self._recomputePath()
         self.draw()

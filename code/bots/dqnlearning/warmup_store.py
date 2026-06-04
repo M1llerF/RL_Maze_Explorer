@@ -17,6 +17,7 @@ from .types import Transition
 class WarmupStoreMeta:
     encoderFingerprint: str
     inputDim: int
+    actionDim: int
     transitionCount: int
 
 
@@ -59,6 +60,7 @@ class WarmupStore:
         dones: np.ndarray,
         masks: np.ndarray,
         nextMasks: np.ndarray,
+        bootstrapDiscounts: np.ndarray,
     ) -> None:
         self.meta = meta
         self._states = states           # (N, D) float32
@@ -66,17 +68,19 @@ class WarmupStore:
         self._rewards = rewards         # (N,) float32
         self._nextStates = nextStates   # (N, D) float32
         self._dones = dones             # (N,) float32
-        self._masks = masks             # (N, 4) bool
-        self._nextMasks = nextMasks     # (N, 4) bool
+        self._masks = masks             # (N, A) bool
+        self._nextMasks = nextMasks     # (N, A) bool
+        self._bootstrapDiscounts = bootstrapDiscounts  # (N,) float32
 
     @property
     def transitionCount(self) -> int:
         return int(self._states.shape[0])
 
-    def isCompatibleWith(self, fingerprint: str, inputDim: int) -> bool:
+    def isCompatibleWith(self, fingerprint: str, inputDim: int, actionDim: int) -> bool:
         return (
             self.meta.encoderFingerprint == fingerprint
             and self.meta.inputDim == inputDim
+            and self.meta.actionDim == actionDim
         )
 
     def inject(self, bot: Any, maxTransitions: int | None = None) -> int:
@@ -93,6 +97,7 @@ class WarmupStore:
         if not self.isCompatibleWith(
             bot.checkpointMeta.encoderConfigFingerprint,
             bot.checkpointMeta.inputDim,
+            int(bot.agent.numActions),
         ):
             raise ValueError(
                 "WarmupStore is incompatible with this bot's encoder "
@@ -110,6 +115,7 @@ class WarmupStore:
                     done=bool(self._dones[i]),
                     validActionMask=self._masks[i],
                     nextValidActionMask=self._nextMasks[i],
+                    bootstrapDiscount=float(self._bootstrapDiscounts[i]),
                 )
             )
         return N
@@ -119,6 +125,7 @@ class WarmupStore:
             "version": self._PAYLOAD_VERSION,
             "fingerprint": self.meta.encoderFingerprint,
             "input_dim": self.meta.inputDim,
+            "action_dim": self.meta.actionDim,
             "transition_count": self.transitionCount,
             "states": self._states,
             "actions": self._actions,
@@ -127,6 +134,7 @@ class WarmupStore:
             "dones": self._dones,
             "masks": self._masks,
             "next_masks": self._nextMasks,
+            "bootstrap_discounts": self._bootstrapDiscounts,
         }
         buf = io.BytesIO()
         torch.save(payload, buf)
@@ -147,6 +155,7 @@ class WarmupStore:
             meta = WarmupStoreMeta(
                 encoderFingerprint=str(data["fingerprint"]),
                 inputDim=int(data["input_dim"]),
+                actionDim=int(data.get("action_dim", 4)),
                 transitionCount=int(data["transition_count"]),
             )
             return cls(
@@ -158,6 +167,10 @@ class WarmupStore:
                 dones=np.asarray(data["dones"], dtype=np.float32),
                 masks=np.asarray(data["masks"], dtype=np.bool_),
                 nextMasks=np.asarray(data["next_masks"], dtype=np.bool_),
+                bootstrapDiscounts=np.asarray(
+                    data.get("bootstrap_discounts", np.ones(int(meta.transitionCount), dtype=np.float32)),
+                    dtype=np.float32,
+                ),
             )
         except Exception:
             return None
@@ -179,15 +192,23 @@ class WarmupStore:
     def inferCompatibilityForProfile(
         cls,
         profile: Any,
-    ) -> tuple[str, int] | None:
+    ) -> tuple[str, int, int] | None:
         if getattr(profile, "botType", "") != "DQNBot":
             return None
         config = getattr(profile, "config", None)
         if config is None:
             return None
+        if bool(getattr(config, "useHierarchicalPolicy", False)):
+            return None
+        if bool(getattr(config, "useMacroOnlyPolicy", False)):
+            return None
 
         from .encoder import StateEncoder
         from .model import MAP_CHANNELS
+        from bots.common.actions import DEFAULT_PRIMITIVE_ACTIONS
+        from bots.common.action_registry import ActionRegistry
+        from bots.common.options_library import defaultOptions
+        from environment.observation_encoder import ObservationEncoder
 
         useRichEncoding = bool(getattr(config, "useRichEncoding", False))
         mapHeight = int(getattr(config, "neuralMapHeight", 31))
@@ -196,6 +217,17 @@ class WarmupStore:
         if useRichEncoding:
             neuralMap = tuple(0.0 for _ in range(MAP_CHANNELS * mapHeight * mapWidth))
 
+        actionRegistry = ActionRegistry()
+        for spec in DEFAULT_PRIMITIVE_ACTIONS:
+            actionRegistry.registerPrimitive(spec, executor=object())
+        if bool(getattr(config, "useMacroActions", False)):
+            for option in defaultOptions():
+                actionRegistry.registerOption(option)
+        actionCount = actionRegistry.numActions() if bool(getattr(config, "useMacroActions", False)) else len(DEFAULT_PRIMITIVE_ACTIONS)
+        entityFeatures: tuple[float, ...] = ()
+        if bool(getattr(config, "useEntityObservation", True)):
+            entityFeatures = tuple(0.0 for _ in range(ObservationEncoder().observationDim()))
+
         sampleObservation = (
             (0, 0),
             (0, 0, 0, 0),
@@ -203,15 +235,16 @@ class WarmupStore:
             -1,
             ((0.0, 0.0, 0.0),) * 4,
             neuralMap,
-            (1, 1, 1, 1),
+            tuple(1 for _ in range(max(1, actionCount))),
             (0.0, 0.0, 0.0),
+            entityFeatures,
         )
         schema = StateEncoder(
             config,
             mazeHeight=1,
             mazeWidth=1,
         ).inferSchema(sampleObservation)
-        return schema.encoderConfigFingerprint, schema.inputDim
+        return schema.encoderConfigFingerprint, schema.inputDim, actionCount
 
     @classmethod
     def loadCompatibleOptions(
@@ -222,11 +255,12 @@ class WarmupStore:
         selectedProfile: str,
         fingerprint: str,
         inputDim: int,
+        actionDim: int,
     ) -> list[WarmupStoreOption]:
         options: list[WarmupStoreOption] = []
         for profileName in profileNames:
             store = cls.load(repo, profileName)
-            if store is None or not store.isCompatibleWith(fingerprint, inputDim):
+            if store is None or not store.isCompatibleWith(fingerprint, inputDim, actionDim):
                 continue
             options.append(
                 WarmupStoreOption(
@@ -277,6 +311,10 @@ class WarmupCollector:
         onProgress receives (current, total) where both quantities match the
         chosen mode (transitions or completions).
         """
+        if bool(getattr(bot, "usesHierarchicalPolicy", False)):
+            raise RuntimeError("Warmup collection is only supported for flat DQN policies.")
+        if bool(getattr(bot, "usesMacroOnlyPolicy", False)):
+            raise RuntimeError("Warmup collection is not supported for macro-only DQN policies.")
         if nCompletions is not None:
             return self._collectByCompletions(
                 bot, env, botIndex, nCompletions, onProgress, onEpisodeComplete, stopRequested
@@ -373,6 +411,7 @@ class WarmupCollector:
         meta = WarmupStoreMeta(
             encoderFingerprint=bot.checkpointMeta.encoderConfigFingerprint,
             inputDim=bot.checkpointMeta.inputDim,
+            actionDim=int(bot.agent.numActions),
             transitionCount=len(transitions),
         )
         return WarmupStore(
@@ -384,4 +423,5 @@ class WarmupCollector:
             dones=np.array([float(t.done) for t in transitions], dtype=np.float32),
             masks=np.stack([t.validActionMask for t in transitions]).astype(np.bool_),
             nextMasks=np.stack([t.nextValidActionMask for t in transitions]).astype(np.bool_),
+            bootstrapDiscounts=np.array([float(t.bootstrapDiscount) for t in transitions], dtype=np.float32),
         )

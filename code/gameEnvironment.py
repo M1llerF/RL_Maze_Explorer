@@ -2,15 +2,25 @@ from botFactory import BotFactory
 from maze import Maze
 from botStatistics import BotStatistics
 from botProfile import BotProfile, ProfileManager
-from typing import Any, Optional, cast
-import threading
+from typing import Any, Optional
 import time
 from services.repository import ArtifactsRepository
-from bots import discoverBotClasses
+from services.profile_service import ProfileService
+from services.linked_profile_service import LinkedProfileService
+from services.bot_runtime_manager import BotRuntimeManager
+from services.diagnostics import DiagnosticsService
+from services.maze_provider import MazeProvider
+from services.warmup_service import WarmupService
 import os
 
 class GameEnvironment:
-    def __init__(self, width: int = 10, height: int = 10, profileDirectory: str = 'profiles'):
+    def __init__(
+        self,
+        width: int = 10,
+        height: int = 10,
+        profileDirectory: str = 'profiles',
+        diagnostics: DiagnosticsService | None = None,
+    ):
         """
         Initialize the GameEnvironment with a maze, bot factory, and profile manager.
 
@@ -19,80 +29,140 @@ class GameEnvironment:
         :param profile_directory: Directory where profiles are stored.
         """
         self.maze = Maze(width, height)
+        self.diagnostics = diagnostics
         # Single shared repository instance for all artifacts
         try:
             os.makedirs(profileDirectory, exist_ok=True)
         except Exception:
             pass
         self.repository = ArtifactsRepository(profileDirectory)
-        self.botFactory = BotFactory(self.maze, repository=self.repository)
+        self.botFactory = BotFactory(
+            self.maze,
+            repository=self.repository,
+            diagnostics=self.diagnostics,
+        )
         self.profileManager = ProfileManager(profileDirectory)
-        self.bots: list[Any] = []
-        self.registerBots()
-        # Training pause control per profile
-        self._pauseLock = threading.Lock()
-        self._pausedProfiles: set[str] = set()
-        # Episode completion tracking per profile (used by training UI)
-        self._completedLock = threading.Lock()
-        self._completedEpisodes: dict[str, int] = {}
-        # Training maze pool (fixed MDP per phase)
-        self.trainingPoolActive: bool = False
-        self.trainingPool: list[dict[str, Any]] = []
-        self.trainingPoolIndex: int = 0
-        # Optional fixed custom maze (overrides random/pool when active)
-        self.fixedMazeActive: bool = False
-        self.fixedMazeState: Optional[dict[str, Any]] = None
-        # Curriculum control (enabled for random training runs by controller)
-        self.curriculumActive: bool = False
+        self.profileService = ProfileService(self.profileManager, self.repository)
+        self.linkedProfileService = LinkedProfileService(
+            self.profileManager,
+            self.profileService,
+            diagnostics=self.diagnostics,
+        )
+        self.warmupService = WarmupService(self.profileManager, self.repository)
+        self.botRuntime = BotRuntimeManager(self.botFactory)
+        self.botRuntime.registerBotTypes()
+        self.mazeProvider = MazeProvider(self.maze)
 
-    # ----- Fixed custom maze controls ----
+    @property
+    def bots(self) -> list[Any]:
+        """Live bot list owned by BotRuntimeManager. Property keeps external callers unchanged."""
+        return self.botRuntime.bots
+
+    @property
+    def trainingPoolActive(self) -> bool:
+        return self.mazeProvider.trainingPoolActive
+
+    @trainingPoolActive.setter
+    def trainingPoolActive(self, value: bool) -> None:
+        self.mazeProvider.trainingPoolActive = bool(value)
+
+    @property
+    def trainingPool(self) -> list[dict[str, Any]]:
+        return self.mazeProvider.trainingPool
+
+    @trainingPool.setter
+    def trainingPool(self, value: list[dict[str, Any]]) -> None:
+        self.mazeProvider.trainingPool = value
+
+    @property
+    def trainingPoolIndex(self) -> int:
+        return self.mazeProvider.trainingPoolIndex
+
+    @trainingPoolIndex.setter
+    def trainingPoolIndex(self, value: int) -> None:
+        self.mazeProvider.trainingPoolIndex = int(value)
+
+    @property
+    def fixedMazeActive(self) -> bool:
+        return self.mazeProvider.fixedMazeActive
+
+    @fixedMazeActive.setter
+    def fixedMazeActive(self, value: bool) -> None:
+        self.mazeProvider.fixedMazeActive = bool(value)
+
+    @property
+    def fixedMazeState(self) -> dict[str, Any] | None:
+        return self.mazeProvider.fixedMazeState
+
+    @fixedMazeState.setter
+    def fixedMazeState(self, value: dict[str, Any] | None) -> None:
+        self.mazeProvider.fixedMazeState = value
+
+    @property
+    def curriculumActive(self) -> bool:
+        return self.mazeProvider.curriculumActive
+
+    @curriculumActive.setter
+    def curriculumActive(self, value: bool) -> None:
+        self.mazeProvider.curriculumActive = bool(value)
+
+    def hasFixedMazeConfigured(self) -> bool:
+        return self.mazeProvider.fixedMazeActive and self.mazeProvider.fixedMazeState is not None
+
+    # ----- Maze lifecycle delegates → MazeProvider ----
     def setFixedMaze(self, state: dict[str, Any]) -> None:
-        """Enable and set a fixed custom maze state to use on each reset."""
-        self.fixedMazeState = state
-        self.fixedMazeActive = True
-        # Disable training pool when using fixed maze
-        self.trainingPoolActive = False
+        self.mazeProvider.setFixedMaze(state)
 
     def clearFixedMaze(self) -> None:
-        """Disable fixed custom maze usage."""
-        self.fixedMazeState = None
-        self.fixedMazeActive = False
+        self.mazeProvider.clearFixedMaze()
+
+    def setRandomGenerationLengthRange(
+        self,
+        minLength: int | None,
+        maxLength: int | None,
+    ) -> None:
+        self.mazeProvider.setRandomGenerationLengthRange(minLength, maxLength)
+
+    def _setupRandomMaze(self) -> None:
+        self.mazeProvider.setupRandomMaze()
+
+    def configureMazeMode(
+        self,
+        mode: str,
+        *,
+        poolSize: int = 20,
+        minLength: int | None = None,
+        maxLength: int | None = None,
+    ) -> None:
+        if mode == "Fixed (Builder)" and not self.hasFixedMazeConfigured():
+            raise RuntimeError("Fixed maze is not configured.")
+        self.mazeProvider.configureMode(
+            mode,
+            poolSize=poolSize,
+            minLength=minLength,
+            maxLength=maxLength,
+        )
 
     def pauseTrainingFor(self, profileName: str) -> None:
-        with self._pauseLock:
-            self._pausedProfiles.add(profileName)
+        self.botRuntime.pause(profileName)
 
     def resumeTrainingFor(self, profileName: str) -> None:
-        with self._pauseLock:
-            self._pausedProfiles.discard(profileName)
+        self.botRuntime.resume(profileName)
 
     def _isPaused(self, profileName: str) -> bool:
-        with self._pauseLock:
-            return profileName in self._pausedProfiles
+        return self.botRuntime.isPaused(profileName)
 
-    # Public helper for UI to check paused state
     def isTrainingPaused(self, profileName: str) -> bool:
-        return self._isPaused(profileName)
+        return self.botRuntime.isPaused(profileName)
 
-    # Completed episode tracking APIs
     def resetCompleted(self, profileName: str) -> None:
-        with self._completedLock:
-            self._completedEpisodes[profileName] = 0
+        self.botRuntime.resetCompleted(profileName)
 
     def incCompleted(self, profileName: str) -> None:
-        with self._completedLock:
-            self._completedEpisodes[profileName] = self._completedEpisodes.get(profileName, 0) + 1
+        self.botRuntime.incCompleted(profileName)
 
     def getCompleted(self, profileName: str) -> int:
-        with self._completedLock:
-            return self._completedEpisodes.get(profileName, 0)
-
-    def registerBots(self) -> None:
-        """
-        Register available bots with the bot factory.
-        """
-        for botType, botClass in discoverBotClasses().items():
-            self.botFactory.registerBot(botType, botClass)
+        return self.botRuntime.getCompleted(profileName)
         
     def setupNewProfile(self, profileName: str, botType: str, config: Any, rewardConfig: Any) -> None:
         """
@@ -104,14 +174,21 @@ class GameEnvironment:
         :param reward_config: Reward configuration for the bot.
         """
         profile = BotProfile(profileName, botType, config, rewardConfig, BotStatistics(), {})
-        self.profileManager.saveProfile(profile)
+        self.profileService.initializeProfile(profile)
+        self.linkedProfileService.syncLinkedProfile(profile)
         # Only attempt to instantiate a bot if the type is registered
         try:
             if botType in self.botFactory.botRegistry:
                 self.setupBots(profile.botType, profile.name, config, rewardConfig, profile.statistics, profile.botSpecificData)
-        except Exception:
-            # Ignore bot creation failures during profile setup so profiles can still be created
-            pass
+        except Exception as e:
+            if self.diagnostics is not None:
+                self.diagnostics.exception(
+                    "game_environment",
+                    "Bot creation failed after profile save",
+                    e,
+                    profile_name=profile.name,
+                    bot_type=profile.botType,
+                )
 
     def gameLoop(self, rounds: int, botIndex: int, visualize: bool = False, visualizationWindow: Optional[Any] = None) -> None:
         """
@@ -135,30 +212,13 @@ class GameEnvironment:
                 visualizationWindow.updateVisualization()
 
     def configureTrainingPool(self, size: int = 20) -> None:
-        """Build a fixed pool of random mazes to cycle through during training."""
-        self.trainingPool = []
-        for _ in range(max(1, size)):
-            self.maze.setupSimpleMaze()
-            self.trainingPool.append(self.maze.getState())
-        self.trainingPoolIndex = 0
-        self.trainingPoolActive = True
-        # Pool overrides any fixed maze selection
-        self.fixedMazeActive = False
-        self.curriculumActive = False
+        self.mazeProvider.configureTrainingPool(size)
 
     def getMazeSize(self) -> tuple[int, int]:
-        return int(self.maze.width), int(self.maze.height)
+        return self.mazeProvider.getMazeSize()
 
     def setMazeSize(self, width: int, height: int) -> None:
-        """
-        Set maze dimensions for subsequent resets and regenerate immediately.
-        Intended for curriculum progression.
-        """
-        self.maze.resize(int(width), int(height), regenerate=True)
-        # Curriculum-controlled random mode should not use pool/fixed snapshots.
-        self.trainingPoolActive = False
-        self.fixedMazeActive = False
-        self.fixedMazeState = None
+        self.mazeProvider.setMazeSize(width, height)
 
     def resetEnvironment(self, botIndex: int) -> None:
         """
@@ -167,22 +227,7 @@ class GameEnvironment:
         :param bot_index: Index of the bot to reset.
         """
         bot = self.bots[botIndex]
-        # Use training pool during training; keep maze stable in visualization unless a pool is configured
-        if self._isPaused(bot.profileName):
-            # Visualization is active for this profile
-            if self.fixedMazeActive and self.fixedMazeState is not None:
-                cast(Any, self.maze).setState(self.fixedMazeState)
-            else:
-                self.maze.setupSimpleMaze()
-        elif self.trainingPoolActive and self.trainingPool:
-            state = self.trainingPool[self.trainingPoolIndex]
-            cast(Any, self.maze).setState(state)
-            self.trainingPoolIndex = (self.trainingPoolIndex + 1) % len(self.trainingPool)
-        else:
-            if self.fixedMazeActive and self.fixedMazeState is not None:
-                cast(Any, self.maze).setState(self.fixedMazeState)
-            else:
-                self.maze.setupSimpleMaze()
+        self.mazeProvider.resetMaze(self._isPaused(bot.profileName))
         for bot in self.bots:
             if bot == self.bots[botIndex]:
                 # Use standardized reset interface
@@ -265,3 +310,16 @@ class GameEnvironment:
                 statistics=bot.statistics
             )
             self.profileManager.saveProfile(profile)
+            self.linkedProfileService.syncLinkedProfile(profile)
+
+    def resetProfileTrainingData(self, profileName: str) -> None:
+        """Clear persisted training artifacts and reload the profile in an untrained state."""
+        profile = self.profileService.resetTrainingState(profileName)
+        self.linkedProfileService.syncLinkedProfile(profile)
+        if profile.botType == "DQNBot":
+            linkedProfile = self.linkedProfileService.resetLinkedProfile(profile.name, profile.config)
+            if linkedProfile is not None:
+                self.applyProfile(linkedProfile, loadCheckpoint=False)
+        self.resetCompleted(profileName)
+        self.resumeTrainingFor(profileName)
+        self.applyProfile(profile, loadCheckpoint=False)

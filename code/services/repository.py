@@ -1,12 +1,19 @@
 import os
 import pickle
 import hashlib
+import shutil
 import tempfile
 from typing import Any, cast
 
 
 ProfileDict = dict[str, Any]
 HeatmapData = dict[tuple[int, int], int]
+
+
+_STATS_KEYS: frozenset[str] = frozenset({
+    'total_steps', 'non_repeating_steps_taken',
+    'times_revisited_squares', 'times_hit_wall',
+})
 
 
 class ArtifactsRepository:
@@ -16,7 +23,10 @@ class ArtifactsRepository:
     - Q-table read/write (+ checksum)
     - Rewards log append
     - Maze runs (mazes.json) latest/highest/lowest
-    - Profile aggregated stats (profile.pkl) counters
+    - Profile aggregated stats (stats.pkl) counters
+
+    profile.pkl is owned exclusively by ProfileManager. This class never
+    writes to it. Stats use stats.pkl to prevent collisions.
 
     All writes are atomic.
     """
@@ -33,7 +43,12 @@ class ArtifactsRepository:
 
     # ---------- Generic paths ----------
     def _profilePath(self, profile: str) -> str:
+        """Profile config path. Owned exclusively by ProfileManager — never write stats here."""
         return os.path.join(self._profileDir(profile), "profile.pkl")
+
+    def _statsPath(self, profile: str) -> str:
+        """Runtime training statistics. Separate from profile.pkl to prevent config collisions."""
+        return os.path.join(self._profileDir(profile), "stats.pkl")
 
     def rewardsPath(self, profile: str) -> str:
         return os.path.join(self._profileDir(profile), "SimulationRewards.txt")
@@ -133,9 +148,9 @@ class ArtifactsRepository:
 
     # ---------- Profile dictionary helpers ----------
     def _readProfileDict(self, profile: str) -> ProfileDict:
-        path = self._profilePath(profile)
+        path = self._statsPath(profile)
         if not os.path.exists(path) or os.path.getsize(path) == 0:
-            return {}
+            return self._migrateCountersFromLegacyProfile(profile)
         try:
             with open(path, 'rb') as f:
                 data = pickle.load(f)
@@ -145,10 +160,28 @@ class ArtifactsRepository:
         except Exception:
             return {}
 
+    def _migrateCountersFromLegacyProfile(self, profile: str) -> ProfileDict:
+        """One-time migration: extract counter fields from profile.pkl into stats.pkl."""
+        try:
+            legacy = self._profilePath(profile)
+            if not os.path.exists(legacy) or os.path.getsize(legacy) == 0:
+                return {}
+            with open(legacy, 'rb') as f:
+                raw = pickle.load(f)
+            if not isinstance(raw, dict):
+                return {}
+            rawDict = cast(ProfileDict, raw)
+            counters: ProfileDict = {k: v for k, v in rawDict.items() if k in _STATS_KEYS}
+            if counters:
+                self._writeProfileDict(profile, counters)
+            return counters
+        except Exception:
+            return {}
+
     def _writeProfileDict(self, profile: str, data: ProfileDict) -> None:
         d = self._profileDir(profile)
         self._ensureDir(d)
-        path = self._profilePath(profile)
+        path = self._statsPath(profile)
         with tempfile.NamedTemporaryFile(delete=False, dir=d, mode='wb') as tmp:
             pickle.dump(data, tmp)
             temp = tmp.name
@@ -288,6 +321,17 @@ class ArtifactsRepository:
             temp = tmp.name
         os.replace(temp, path)
 
+    def ensureProfileArtifacts(self, profile: str) -> None:
+        """Create empty artifact stubs for a newly created profile."""
+        d = self._profileDir(profile)
+        self._ensureDir(d)
+        for name in ("SimulationRewards.txt", "HeatmapData.txt"):
+            p = os.path.join(d, name)
+            if not os.path.exists(p):
+                with open(p, 'w') as f:
+                    f.write("")
+        self.ensureMazeFile(profile)
+
     def ensureMazeFile(self, profile: str) -> None:
         """Create mazes.json with default structure if missing."""
         import json
@@ -305,6 +349,32 @@ class ArtifactsRepository:
             json.dump(data, tmp, indent=4)
             temp = tmp.name
         os.replace(temp, path)
+
+    def clearProfileTrainingArtifacts(self, profile: str) -> None:
+        """Delete durable training artifacts while keeping the profile itself."""
+        pathsToRemove = (
+            self.qTablePath(profile),
+            self.qTableChecksumPath(profile),
+            self.mazesJsonPath(profile),
+            self.modelArtifactsDir(profile),
+            os.path.join(self._profileDir(profile), "HeatmapData.txt"),
+            self._statsPath(profile),
+        )
+        for path in pathsToRemove:
+            if not os.path.exists(path):
+                continue
+            if os.path.isdir(path):
+                shutil.rmtree(path)
+            else:
+                os.remove(path)
+
+        rewardsPath = self.rewardsPath(profile)
+        self._ensureDir(self._profileDir(profile))
+        with open(rewardsPath, 'w') as f:
+            f.write("")
+        with open(os.path.join(self._profileDir(profile), "HeatmapData.txt"), 'w') as f:
+            f.write("")
+        self.ensureMazeFile(profile)
 
     def updateStepsFromHeatmap(self, profile: str, heatmapData: HeatmapData) -> None:
         """Update total_steps, times_revisited_squares, non_repeating_steps_taken from heatmap."""

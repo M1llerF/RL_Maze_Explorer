@@ -8,6 +8,7 @@ import torch
 from torch import nn
 from torch.optim import Adam
 
+from bots.common.decision import ActionChoice, DecisionInput
 from .config import DQNConfig
 from .model import DqnModel
 from .replay import ReplayStore, UniformReplayStore
@@ -42,15 +43,20 @@ class DqnAgent:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         resolvedFlatDim = int(flatDim) if flatDim is not None else self.inputDim
         mapEmbedDim = int(getattr(config, "mapEmbedDim", 0)) if mapShape is not None else 0
-        modelKwargs = dict(
+        self.policy = DqnModel(
             flatDim=resolvedFlatDim,
             hiddenSize=self.config.hiddenSize,
             numActions=self.numActions,
             mapShape=mapShape,
             mapEmbedDim=mapEmbedDim,
-        )
-        self.policy = DqnModel(**modelKwargs).to(self.device)
-        self.target = DqnModel(**modelKwargs).to(self.device)
+        ).to(self.device)
+        self.target = DqnModel(
+            flatDim=resolvedFlatDim,
+            hiddenSize=self.config.hiddenSize,
+            numActions=self.numActions,
+            mapShape=mapShape,
+            mapEmbedDim=mapEmbedDim,
+        ).to(self.device)
         self.target.load_state_dict(self.policy.state_dict())
         self.target.eval()
         self.optimizer = Adam(self.policy.parameters(), lr=self.config.learningRate)
@@ -64,29 +70,35 @@ class DqnAgent:
         self.lastLoss: float | None = None
         self.manualEpsilonOverride: float | None = None
 
-    def chooseAction(self, encodedState: EncodedState, training: bool) -> int:
+    def chooseAction(self, decision: DecisionInput, training: bool) -> ActionChoice:
+        encodedState = decision.state
+        if not isinstance(encodedState, EncodedState):
+            raise TypeError("DqnAgent expects DecisionInput.state to be an EncodedState")
         validActions = np.flatnonzero(encodedState.validActionMask).tolist()
         if not validActions:
-            validActions = [0, 1, 2, 3]
+            validActions = list(range(self.numActions))
         if training and random.random() < self._epsilon():
-            return int(random.choice(validActions))
+            return ActionChoice(local_id=int(random.choice(validActions)))
         with torch.inference_mode():
             stateTensor = torch.as_tensor(encodedState.values, dtype=torch.float32, device=self.device).unsqueeze(0)
             qValues = self.policy(stateTensor)
             mask = torch.as_tensor(encodedState.validActionMask, dtype=torch.bool, device=self.device).unsqueeze(0)
             qValues = qValues.masked_fill(~mask, torch.finfo(qValues.dtype).min)
-            return int(torch.argmax(qValues, dim=1).item())
+            return ActionChoice(local_id=int(torch.argmax(qValues, dim=1).item()))
 
-    def selectWarmupAction(self, encodedState: EncodedState, plannerAction: int | None) -> int:
+    def selectWarmupAction(self, decision: DecisionInput, plannerAction: int | None) -> ActionChoice:
+        encodedState = decision.state
+        if not isinstance(encodedState, EncodedState):
+            raise TypeError("DqnAgent expects DecisionInput.state to be an EncodedState")
         valid = encodedState.validActionMask
-        if plannerAction is not None and 0 <= plannerAction <= 3 and bool(valid[plannerAction]):
+        if plannerAction is not None and 0 <= plannerAction < self.numActions and bool(valid[plannerAction]):
             self.plannerActionCount += 1
-            return int(plannerAction)
+            return ActionChoice(local_id=int(plannerAction))
         validActions = np.flatnonzero(valid).tolist()
         if not validActions:
-            validActions = [0, 1, 2, 3]
+            validActions = list(range(self.numActions))
         self.randomFallbackCount += 1
-        return int(random.choice(validActions))
+        return ActionChoice(local_id=int(random.choice(validActions)))
 
     def storeTransition(self, transition: Transition) -> None:
         self.replay.push(transition)
@@ -144,21 +156,19 @@ class DqnAgent:
     def _optimize(self, batch: DqnTrainingBatch) -> float:
         states = torch.as_tensor(batch.states, dtype=torch.float32, device=self.device)
         actions = torch.as_tensor(batch.actions, dtype=torch.int64, device=self.device).unsqueeze(1)
-        rewards = torch.as_tensor(batch.rewards, dtype=torch.float32, device=self.device).clamp(
-            float(self.config.rewardClipMin),
-            float(self.config.rewardClipMax),
-        )
+        rewards = torch.as_tensor(batch.rewards, dtype=torch.float32, device=self.device)
         nextStates = torch.as_tensor(batch.nextStates, dtype=torch.float32, device=self.device)
         dones = torch.as_tensor(batch.dones, dtype=torch.float32, device=self.device)
         nextMasks = torch.as_tensor(batch.nextValidActionMasks, dtype=torch.bool, device=self.device)
+        bootstrapDiscounts = torch.as_tensor(batch.bootstrapDiscounts, dtype=torch.float32, device=self.device)
         currentQ = self.policy(states).gather(1, actions).squeeze(1)
         with torch.no_grad():
             nextQ = self.target(nextStates).masked_fill(~nextMasks, torch.finfo(torch.float32).min)
             maxNextQ = torch.max(nextQ, dim=1).values
-            targetQ = rewards + float(self.config.discountFactor) * maxNextQ * (1.0 - dones)
+            targetQ = rewards + bootstrapDiscounts * maxNextQ * (1.0 - dones)
         loss = nn.functional.smooth_l1_loss(currentQ, targetQ, reduction="mean")
         self.optimizer.zero_grad()
-        loss.backward()
+        torch.autograd.backward(loss)
         nn.utils.clip_grad_norm_(self.policy.parameters(), max_norm=10.0)
         self.optimizer.step()
         return float(loss.detach().cpu().item())

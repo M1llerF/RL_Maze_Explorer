@@ -22,7 +22,7 @@ class CurriculumWindowEntry:
 class CurriculumProfileState:
     size: int
     episodesAtSize: int = 0
-    history: deque[CurriculumWindowEntry] = field(default_factory=deque)
+    history: deque[CurriculumWindowEntry] = field(default_factory=lambda: deque[CurriculumWindowEntry]())
 
 
 @dataclass(frozen=True)

@@ -2,6 +2,7 @@ import heapq
 import numpy as np
 from typing import Any
 from collections import deque
+from environment.traversal import TraversalPolicy, build_traversal_policy
 
 _DIRS = ((-1, 0), (1, 0), (0, -1), (0, 1))
 _DELTA_TO_ACTION = {(-1, 0): 0, (1, 0): 1, (0, -1): 2, (0, 1): 3}
@@ -210,7 +211,14 @@ class Pathfinding:
         return Pathfinding._aStarPartialKnowledge(height, width, start, goal, knownWalls)
 
     @staticmethod
-    def aStarSearch(maze: Any, start: tuple[int, int], goal: tuple[int, int]) -> list[tuple[int, int]]:
+    def aStarSearch(
+        maze: Any,
+        start: tuple[int, int],
+        goal: tuple[int, int],
+        traversal: TraversalPolicy | None = None,
+    ) -> list[tuple[int, int]]:
+        policy = traversal or build_traversal_policy(maze)
+
         def heuristic(a: tuple[int, int], b: tuple[int, int]) -> float:
             return float(np.linalg.norm(np.array(a) - np.array(b)))
 
@@ -218,7 +226,7 @@ class Pathfinding:
             neighbors: list[tuple[int, int]] = []
             for dx, dy in _DIRS:
                 x2, y2 = pos[0] + dx, pos[1] + dy
-                if 0 <= x2 < maze.height and 0 <= y2 < maze.width and maze.isValidPosition(None, x2, y2):
+                if 0 <= x2 < maze.height and 0 <= y2 < maze.width and policy.is_valid_position((x2, y2)):
                     neighbors.append((x2, y2))
             return neighbors
 

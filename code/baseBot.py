@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from bots.bot_status import BotStatus
 
 
 class BaseBot:
@@ -17,61 +20,139 @@ class BaseBot:
     - Visualization must remain inference-only and non-persistent.
     - Bots can expose step-wise visualization methods, but these must not
       mutate durable training artifacts.
+
+    Action / environment contract:
+    - Subclasses that use ActionRegistry must implement encodeState(),
+      getActionSpace(), getPolicyActionSpace(), getValidActionMask(),
+      applyStep(), addReward(), shapingPenalty(), and isWarmingUp.
+    - The runner/agent interacts with the bot only through these methods;
+      it never knows what any action means internally.
     """
     def __init__(self, maze: Any, statistics: Any, config: Any = None) -> None:
-        """
-        Initialize the base bot.
-
-        :param maze: The maze object that the bot will navigate.
-        :param statistics: a instance of BotStatistics to track the bot's performance.
-        :param config: Optional configuration for specific algorithms (e.g., Q-learning config).
-        """
         self.maze = maze
         self.statistics = statistics
         self.config = config
-        # Cooperative stop flag to abort long episodes promptly
         self._stopRequested = False
-    
+        self._pushCooldownRemaining: int = 0
+
+    # ── Push cooldown ─────────────────────────────────────────────────────────
+
+    @property
+    def pushCooldownSteps(self) -> int:
+        return max(1, int(getattr(self.config, "pushCooldownSteps", 3)))
+
+    def isPushReady(self) -> bool:
+        return self._pushCooldownRemaining <= 0
+
+    def consumePushCooldown(self) -> None:
+        self._pushCooldownRemaining = self.pushCooldownSteps
+
+    def tickPushCooldown(self) -> None:
+        if self._pushCooldownRemaining > 0:
+            self._pushCooldownRemaining -= 1
+
     def reset(self) -> None:
-        """Reset the bot's state and statistics. Should be implemented by subclasses."""
         raise NotImplementedError("This method should be implemented by subclasses.")
 
     def calculateState(self) -> Any:
-        """Calculate the current state of the bot. Should be implemented by subclasses."""
         raise NotImplementedError("This method should be implemented by subclasses.")
 
     def runEpisode(self) -> None:
-        """Run a single episode of the bot's operation. Should be implemented by subclasses."""
         raise NotImplementedError("This method should be implemented by subclasses.")
 
-    # Episode lifecycle hooks ------------------------------------------------
-    def onEpisodeStart(self, mode: str) -> None:
-        """
-        Hook called exactly once at episode start.
+    # ── Episode lifecycle hooks ───────────────────────────────────────────────
 
-        :param mode: Execution context such as "training" or "visualization".
-        """
+    def onEpisodeStart(self, mode: str) -> None:
         raise NotImplementedError("This method should be implemented by subclasses.")
 
     def onEpisodeStep(self, mode: str, stepIndex: int) -> None:
-        """
-        Hook called on each episode loop iteration.
-
-        :param mode: Execution context such as "training" or "visualization".
-        :param step_index: Zero-based step index.
-        """
         raise NotImplementedError("This method should be implemented by subclasses.")
 
     def onEpisodeEnd(self, mode: str, outcome: str) -> None:
-        """
-        Hook called exactly once when an episode exits.
-
-        :param mode: Execution context such as "training" or "visualization".
-        :param outcome: Human-readable terminal reason.
-        """
         raise NotImplementedError("This method should be implemented by subclasses.")
 
-    # Cooperative stop handling
+    # ── Shared action / environment contract ─────────────────────────────────
+    # Subclasses using ActionRegistry should override these.
+
+    def encodeState(self) -> Any:
+        """Return the encoded state ready for the learning algorithm."""
+        raise NotImplementedError
+
+    def getActionSpace(self) -> list[Any]:
+        """Return list[ActionSpec] from the bot's ActionRegistry."""
+        raise NotImplementedError
+
+    def getPolicyActionSpace(self) -> list[Any]:
+        """
+        Return the bot's current policy action space as dense local ActionSpecs.
+
+        This ordering must match any learned value table indexed by local action
+        id, so visualization and diagnostics can label actions correctly when
+        macro-actions/options are enabled.
+        """
+        raise NotImplementedError
+
+    def getValidActionMask(self) -> list[bool]:
+        """Return a bool mask over the full action space for the current state."""
+        raise NotImplementedError
+
+    def applyStep(self, action_id: int) -> Any:
+        """Execute action_id through the ActionRegistry and update internal state."""
+        raise NotImplementedError
+
+    def addReward(self, amount: float, reason: str = "") -> None:
+        """Accumulate reward for the current episode."""
+        raise NotImplementedError
+
+    def shapingPenalty(self) -> float:
+        """Return any additional shaping penalty for the current step."""
+        return 0.0
+
+    @property
+    def isWarmingUp(self) -> bool:
+        """True during warmup/guided phase (no learning updates)."""
+        return False
+
+    # ── Cooperative stop handling ─────────────────────────────────────────────
+
+    # ── Public action / step contract ────────────────────────────────────────
+
+    def isOptionAction(self, semanticId: int) -> bool:
+        """Return True if semanticId refers to a macro-action/option."""
+        return False
+
+    def executePrimitiveAction(self, semanticId: int) -> Any:
+        """Execute a primitive action by semantic ID and return a StepResult."""
+        raise NotImplementedError
+
+    def selectAction(self, decision: Any) -> Any:
+        """Choose an action given a DecisionInput; return ActionChoice."""
+        raise NotImplementedError
+
+    # ── Runtime status ────────────────────────────────────────────────────────
+
+    def isStopRequested(self) -> bool:
+        """Return True if a cooperative stop has been requested."""
+        return self._stopRequested
+
+    def getStatus(self) -> "BotStatus":
+        """Return a normalized snapshot of this bot's runtime state for UI display."""
+        raise NotImplementedError
+
+    # ── Manual epsilon override ───────────────────────────────────────────────
+
+    def setManualEpsilon(self, value: float | None) -> bool:
+        """Override the exploration rate. Pass None to clear. Returns False if unsupported."""
+        return False
+
+    def persistTrainingArtifacts(self) -> None:
+        """Save algorithm-specific training artifacts (Q-table, checkpoint, etc.).
+
+        Called by PostEpisodeRecorder after each training episode.
+        Subclasses override to save whatever the algorithm requires.
+        """
+        pass
+
     def requestStop(self) -> None:
         self._stopRequested = True
 

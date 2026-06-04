@@ -11,11 +11,6 @@ from .config import DQNConfig
 from .model import MAP_CHANNELS
 from .types import EncodedState
 
-# Number of floats in the v3 flat portion (wall×4 + delta×2 + action_oh×4 + local_obs×12 + goal×3).
-# This is a structural constant — it must match _encodeV3Features's fixed output size.
-_V3_FLAT_DIM = 25
-
-
 @dataclass(frozen=True)
 class EncoderSchemaMeta:
     stateSchemaVersion: int
@@ -48,6 +43,7 @@ class StateEncoder:
         neuralMap: tuple[float, ...] | np.ndarray = ()
         validActions: tuple[int, ...] = (1, 1, 1, 1)
         goalInfo: tuple[float, float, float] = (0.0, 0.0, 0.0)
+        entityFeatures: tuple[float, ...] = ()
 
         if len(observation) >= 7:
             previousDelta = cast(tuple[int, int], observation[2])
@@ -57,6 +53,8 @@ class StateEncoder:
             validActions = cast(tuple[int, ...], observation[6])
         if len(observation) >= 8:
             goalInfo = cast(tuple[float, float, float], observation[7])
+        if len(observation) >= 9:
+            entityFeatures = tuple(float(v) for v in cast(tuple[float, ...], observation[8]))
 
         mask = np.asarray([int(v) > 0 for v in validActions], dtype=np.bool_)
         version = int(getattr(self.config, "stateEncodingVersion", 2))
@@ -65,12 +63,13 @@ class StateEncoder:
         if version >= 3:
             features = self._encodeV3Features(
                 wallDistances, previousDelta, lastAction, localObservation, goalInfo,
+                entityFeatures=entityFeatures,
                 neuralMap=neuralMap, useRichEncoding=useRich,
             )
         else:
             features = self._encodeV2Features(
                 positionIndex, wallDistances, previousDelta, lastAction,
-                localObservation, neuralMap, useRich,
+                localObservation, neuralMap, useRich, entityFeatures,
             )
 
         return EncodedState(values=np.asarray(features, dtype=np.float32), validActionMask=mask)
@@ -82,15 +81,13 @@ class StateEncoder:
         useRich = bool(getattr(self.config, "useRichEncoding", False))
 
         if version >= 3 and useRich:
-            # The v3 flat portion is always _V3_FLAT_DIM floats.
-            # Neural map output is fixed-size (config HxW), padded in bot._encodeNeuralMap.
-            flatDim = _V3_FLAT_DIM
             mapH_actual = int(getattr(self.config, "neuralMapHeight", 31))
             mapW_actual = int(getattr(self.config, "neuralMapWidth", 31))
-            mapDim = inputDim - flatDim
             mapShape: tuple[int, int, int] | None
-            if mapDim > 0 and mapDim == MAP_CHANNELS * mapH_actual * mapW_actual:
+            expectedMapDim = MAP_CHANNELS * mapH_actual * mapW_actual
+            if inputDim > expectedMapDim and (inputDim - expectedMapDim) > 0:
                 mapShape = (MAP_CHANNELS, mapH_actual, mapW_actual)
+                flatDim = inputDim - expectedMapDim
             else:
                 # Map is absent or dimensions don't match — fall back to MLP-only.
                 mapShape = None
@@ -172,6 +169,7 @@ class StateEncoder:
         localObservation: tuple[tuple[float, float, float], ...],
         goalInfo: tuple[float, float, float],
         *,
+        entityFeatures: tuple[float, ...] = (),
         neuralMap: tuple[float, ...] | np.ndarray = (),
         useRichEncoding: bool = False,
     ) -> list[float] | np.ndarray:
@@ -202,6 +200,7 @@ class StateEncoder:
         for _ in range(4 - len(rays)):
             flat.extend([0.0, 0.0, 0.0])
         flat.extend(float(v) for v in goalInfo)
+        flat.extend(float(v) for v in entityFeatures)
 
         if useRichEncoding and len(neuralMap) > 0:
             # Fast path: np.concatenate avoids a second Python-level iteration
@@ -225,6 +224,7 @@ class StateEncoder:
         localObservation: tuple[tuple[float, float, float], ...],
         neuralMap: tuple[float, ...] | np.ndarray,
         useRichEncoding: bool,
+        entityFeatures: tuple[float, ...],
     ) -> list[float]:
         encoded: list[float] = []
 
@@ -249,6 +249,7 @@ class StateEncoder:
             for cellFeatures in localObservation:
                 encoded.extend(float(v) for v in cellFeatures)
             encoded.extend(float(value) for value in neuralMap)
+        encoded.extend(float(v) for v in entityFeatures)
 
         return encoded
 
@@ -261,6 +262,9 @@ class StateEncoder:
             "stateEncodingVersion": int(self.config.stateEncodingVersion),
             "useRichEncoding": bool(getattr(self.config, "useRichEncoding", False)),
             "usePositionInState": bool(getattr(self.config, "usePositionInState", True)),
+            "useEntityObservation": bool(getattr(self.config, "useEntityObservation", False)),
+            "useEnemyObservation": bool(getattr(self.config, "useEnemyObservation", False)),
+            "useAttackActions": bool(getattr(self.config, "useAttackActions", False)),
             "neuralMapHeight": int(getattr(self.config, "neuralMapHeight", 31)),
             "neuralMapWidth": int(getattr(self.config, "neuralMapWidth", 31)),
             "neuralMapPoolSize": int(getattr(self.config, "neuralMapPoolSize", 8)),

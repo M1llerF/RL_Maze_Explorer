@@ -118,8 +118,8 @@ class BotProfile:
             s = BotStatistics()
             try:
                 s.__dict__.update(BotProfile._legacyKeyNormalized(cast(dict[str, Any], statistics)))
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[ProfileLoad] Could not restore statistics for '{name}': {e}")
             statistics = s
         elif not isinstance(statistics, BotStatistics):
             statistics = BotStatistics()
@@ -166,9 +166,8 @@ class ProfileManager:
             tempName = tmp.name
         os.replace(tempName, filename)
 
-        # Avoid creating empty q_table.pkl to prevent EOFError on first load.
-        self._createEmptyFile(os.path.join(profileDir, "SimulationRewards.txt"))
-        self._createEmptyFile(os.path.join(profileDir, "HeatmapData.txt"))
+        # Training artifact stubs (SimulationRewards.txt, HeatmapData.txt, mazes.json)
+        # are created by ArtifactsRepository.ensureProfileArtifacts(), not here.
 
 
     def loadProfile(self, profileName: str) -> BotProfile:

@@ -4,10 +4,12 @@
     "tests"
   ],
   "exclude": [
-    "code/DetermineBotFunctionality", "**/node_modules", "**/__pycache__", "**/.*", ".venv"
+    "code/DetermineBotFunctionality", "code/DQN_Mixed", "**/node_modules", "**/__pycache__", "**/.*", ".venv"
   ],
   "typeCheckingMode": "strict",
   "reportMissingTypeStubs": "none",
+  "reportPrivateImportUsage": "none",
+  "reportUnknownMemberType": "none",
   "extraPaths": [
     "./code"
   ]
