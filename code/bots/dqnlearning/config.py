@@ -54,8 +54,44 @@ def _as_bool(value: Any, fieldName: str) -> bool:
     raise ConfigValidationError(f"{fieldName} must be boolean-compatible, got {value!r}")
 
 
+def _as_string(value: Any, fieldName: str) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _as_macro_option_set(value: Any, fieldName: str) -> str:
+    if isinstance(value, bool):
+        return "naive"
+    if isinstance(value, (int, float)):
+        parsed = int(value)
+        if float(value) == float(parsed):
+            if parsed in (0, 1):
+                return "naive"
+            if parsed == 2:
+                return "momentum"
+            if parsed == 3:
+                return "astar"
+        raise ConfigValidationError(f"{fieldName} must be 1 (naive), 2 (momentum), 3 (astar), or a matching name")
+    normalized = _as_string(value, fieldName).lower()
+    if normalized in ("", "0", "0.0", "1", "1.0", "naive"):
+        return "naive"
+    if normalized in ("2", "2.0", "momentum"):
+        return "momentum"
+    if normalized in ("3", "3.0", "astar"):
+        return "astar"
+    raise ConfigValidationError(f"{fieldName} must be 1/'naive', 2/'momentum', or 3/'astar'")
+
+
 @dataclass(frozen=True)
 class DQNConfig:
+    """
+    Frozen configuration for a DQN training session. All fields are validated at construction time.
+    Build from a saved profile by passing its dictionary to the class method that accepts one.
+    Macro action modes are mutually exclusive. Enabling hierarchical or macro only policy
+    automatically sets useMacroActions even if the caller omits it.
+    """
+
     learningRate: float = 1e-4
     discountFactor: float = 0.99
     epsilonStart: float = 1.0
@@ -69,6 +105,7 @@ class DQNConfig:
     maxStepsPerEpisode: int = 5000
     hiddenSize: int = 256
     useRichEncoding: bool = False
+    useSharedComparisonState: bool = True
     usePositionInState: bool = True
     useEntityObservation: bool = True
     useEnemyObservation: bool = False
@@ -76,14 +113,19 @@ class DQNConfig:
     autoAttackAdjacentEnemy: bool = False
     pushCooldownSteps: int = 3
     useMacroActions: bool = False
+    macroOptionSet: str = "naive"
     useMacroOnlyPolicy: bool = False
     dualRecordPrimitivePolicy: bool = False
     useHierarchicalPolicy: bool = False
+    useLstmPolicy: bool = False
+    lstmSequenceLength: int = 8
+    lstmHiddenSize: int = 128
     neuralMapWidth: int = 31
     neuralMapHeight: int = 31
     neuralMapPoolSize: int = 8
-    immediateReversalPenalty: float = -12.0
-    repeatVisitPenaltyScale: float = -2.0
+    immediateReversalPenalty: float = -5.0
+    oscillationPenalty: float = -50.0
+    repeatVisitPenaltyScale: float = 0.0
     noProgressPenalty: float = -150.0
     noProgressPatienceFactor: float = 2.0
     minNoProgressSteps: int = 30
@@ -91,7 +133,7 @@ class DQNConfig:
     diagnosticsFrequency: int = 0
     rewardClipMin: float | None = None
     rewardClipMax: float | None = None
-    stateEncodingVersion: int = 4
+    stateEncodingVersion: int = 7
     mapEmbedDim: int = 128
     checkpointFrequency: int = 10
     evaluationFrequency: int = 10
@@ -133,14 +175,17 @@ class DQNConfig:
             epsilonEnd=_as_float(raw.get("epsilonEnd", cls.epsilonEnd), "epsilonEnd"),
             epsilonDecaySteps=_as_int(raw.get("epsilonDecaySteps", cls.epsilonDecaySteps), "epsilonDecaySteps", 1),
             replayCapacity=_as_int(raw.get("replayCapacity", cls.replayCapacity), "replayCapacity", 1),
-            # Warmup transition target is shared behavior, not a per-profile knob.
-            replayWarmupSteps=cls.replayWarmupSteps,
+            replayWarmupSteps=_as_int(raw.get("replayWarmupSteps", cls.replayWarmupSteps), "replayWarmupSteps", 0),
             batchSize=_as_int(raw.get("batchSize", cls.batchSize), "batchSize", 1),
             trainFrequency=_as_int(raw.get("trainFrequency", cls.trainFrequency), "trainFrequency", 1),
             targetUpdateFrequency=_as_int(raw.get("targetUpdateFrequency", cls.targetUpdateFrequency), "targetUpdateFrequency", 1),
             maxStepsPerEpisode=_as_int(raw.get("maxStepsPerEpisode", cls.maxStepsPerEpisode), "maxStepsPerEpisode", 1),
             hiddenSize=_as_int(raw.get("hiddenSize", cls.hiddenSize), "hiddenSize", 1),
             useRichEncoding=_as_bool(raw.get("useRichEncoding", cls.useRichEncoding), "useRichEncoding"),
+            useSharedComparisonState=_as_bool(
+                raw.get("useSharedComparisonState", cls.useSharedComparisonState),
+                "useSharedComparisonState",
+            ),
             usePositionInState=_as_bool(raw.get("usePositionInState", cls.usePositionInState), "usePositionInState"),
             useEntityObservation=_as_bool(raw.get("useEntityObservation", cls.useEntityObservation), "useEntityObservation"),
             useEnemyObservation=_as_bool(raw.get("useEnemyObservation", cls.useEnemyObservation), "useEnemyObservation"),
@@ -153,16 +198,21 @@ class DQNConfig:
             useMacroActions=_as_bool(raw.get("useMacroActions", cls.useMacroActions), "useMacroActions")
             or useMacroOnlyPolicy
             or useHierarchicalPolicy,
+            macroOptionSet=_as_macro_option_set(raw.get("macroOptionSet", 1), "macroOptionSet"),
             useMacroOnlyPolicy=useMacroOnlyPolicy,
             dualRecordPrimitivePolicy=_as_bool(
                 raw.get("dualRecordPrimitivePolicy", cls.dualRecordPrimitivePolicy),
                 "dualRecordPrimitivePolicy",
             ),
             useHierarchicalPolicy=useHierarchicalPolicy,
+            useLstmPolicy=_as_bool(raw.get("useLstmPolicy", cls.useLstmPolicy), "useLstmPolicy"),
+            lstmSequenceLength=_as_int(raw.get("lstmSequenceLength", cls.lstmSequenceLength), "lstmSequenceLength", 1),
+            lstmHiddenSize=_as_int(raw.get("lstmHiddenSize", cls.lstmHiddenSize), "lstmHiddenSize", 1),
             neuralMapWidth=_as_int(raw.get("neuralMapWidth", cls.neuralMapWidth), "neuralMapWidth", 1),
             neuralMapHeight=_as_int(raw.get("neuralMapHeight", cls.neuralMapHeight), "neuralMapHeight", 1),
             neuralMapPoolSize=_as_int(raw.get("neuralMapPoolSize", cls.neuralMapPoolSize), "neuralMapPoolSize", 1),
             immediateReversalPenalty=_as_penalty_float(raw.get("immediateReversalPenalty", cls.immediateReversalPenalty), "immediateReversalPenalty"),
+            oscillationPenalty=_as_penalty_float(raw.get("oscillationPenalty", cls.oscillationPenalty), "oscillationPenalty"),
             repeatVisitPenaltyScale=_as_penalty_float(raw.get("repeatVisitPenaltyScale", cls.repeatVisitPenaltyScale), "repeatVisitPenaltyScale"),
             noProgressPenalty=_as_penalty_float(raw.get("noProgressPenalty", cls.noProgressPenalty), "noProgressPenalty"),
             noProgressPatienceFactor=_as_float(raw.get("noProgressPatienceFactor", cls.noProgressPatienceFactor), "noProgressPatienceFactor"),
@@ -189,6 +239,24 @@ class DQNConfig:
         return config
 
     def _validate_ranges(self) -> None:
+        # Mutual-exclusion checks first so they surface with clear messages
+        # before any secondary validation that could produce a misleading error.
+        if self.useHierarchicalPolicy and self.useMacroOnlyPolicy:
+            raise ConfigValidationError("useHierarchicalPolicy and useMacroOnlyPolicy are mutually exclusive")
+        if self.dualRecordPrimitivePolicy and self.useHierarchicalPolicy:
+            raise ConfigValidationError("dualRecordPrimitivePolicy is not supported with hierarchical policy")
+        if self.useLstmPolicy and self.useHierarchicalPolicy:
+            raise ConfigValidationError("useLstmPolicy is not supported with hierarchical policy")
+        # Dependency checks
+        if self.useMacroOnlyPolicy and not self.useMacroActions:
+            raise ConfigValidationError("useMacroOnlyPolicy requires useMacroActions to be enabled")
+        if self.useHierarchicalPolicy and not self.useMacroActions:
+            raise ConfigValidationError("useHierarchicalPolicy requires useMacroActions to be enabled")
+        if self.dualRecordPrimitivePolicy and not self.useMacroOnlyPolicy:
+            raise ConfigValidationError("dualRecordPrimitivePolicy requires useMacroOnlyPolicy to be enabled")
+        if self.macroOptionSet not in {"naive", "astar", "momentum"}:
+            raise ConfigValidationError("macroOptionSet must resolve to 'naive', 'astar', or 'momentum'")
+        # Range checks
         if not (0.0 <= self.discountFactor <= 1.0):
             raise ConfigValidationError("discountFactor must be in [0.0, 1.0]")
         if not (0.0 <= self.epsilonStart <= 1.0):
@@ -207,13 +275,3 @@ class DQNConfig:
             raise ConfigValidationError("noProgressPatienceFactor must be >= 0")
         if self.maxNoProgressSteps < self.minNoProgressSteps:
             raise ConfigValidationError("maxNoProgressSteps must be >= minNoProgressSteps")
-        if self.useMacroOnlyPolicy and not self.useMacroActions:
-            raise ConfigValidationError("useMacroOnlyPolicy requires useMacroActions to be enabled")
-        if self.useHierarchicalPolicy and not self.useMacroActions:
-            raise ConfigValidationError("useHierarchicalPolicy requires useMacroActions to be enabled")
-        if self.useHierarchicalPolicy and self.useMacroOnlyPolicy:
-            raise ConfigValidationError("useHierarchicalPolicy and useMacroOnlyPolicy are mutually exclusive")
-        if self.dualRecordPrimitivePolicy and not self.useMacroOnlyPolicy:
-            raise ConfigValidationError("dualRecordPrimitivePolicy requires useMacroOnlyPolicy to be enabled")
-        if self.dualRecordPrimitivePolicy and self.useHierarchicalPolicy:
-            raise ConfigValidationError("dualRecordPrimitivePolicy is not supported with hierarchical policy")

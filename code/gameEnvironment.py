@@ -5,12 +5,12 @@ from botProfile import BotProfile, ProfileManager
 from typing import Any, Optional
 import time
 from services.repository import ArtifactsRepository
-from services.profile_service import ProfileService
-from services.linked_profile_service import LinkedProfileService
-from services.bot_runtime_manager import BotRuntimeManager
+from services.profileService import ProfileService
+from services.linkedProfileService import LinkedProfileService
+from services.botRuntimeManager import BotRuntimeManager
 from services.diagnostics import DiagnosticsService
-from services.maze_provider import MazeProvider
-from services.warmup_service import WarmupService
+from services.mazeProvider import MazeProvider
+from services.warmupService import WarmupService
 import os
 
 class GameEnvironment:
@@ -99,6 +99,10 @@ class GameEnvironment:
         self.mazeProvider.fixedMazeState = value
 
     @property
+    def fixedMazeLabel(self) -> str:
+        return str(getattr(self.mazeProvider, "fixedMazeLabel", ""))
+
+    @property
     def curriculumActive(self) -> bool:
         return self.mazeProvider.curriculumActive
 
@@ -110,11 +114,14 @@ class GameEnvironment:
         return self.mazeProvider.fixedMazeActive and self.mazeProvider.fixedMazeState is not None
 
     # ----- Maze lifecycle delegates → MazeProvider ----
-    def setFixedMaze(self, state: dict[str, Any]) -> None:
-        self.mazeProvider.setFixedMaze(state)
+    def setFixedMaze(self, state: dict[str, Any], *, label: str | None = None) -> None:
+        self.mazeProvider.setFixedMaze(state, label=label)
 
     def clearFixedMaze(self) -> None:
         self.mazeProvider.clearFixedMaze()
+
+    def getFixedMazeLabel(self) -> str:
+        return str(getattr(self.mazeProvider, "fixedMazeLabel", ""))
 
     def setRandomGenerationLengthRange(
         self,
@@ -122,6 +129,9 @@ class GameEnvironment:
         maxLength: int | None,
     ) -> None:
         self.mazeProvider.setRandomGenerationLengthRange(minLength, maxLength)
+
+    def setRandomIncludeEnemies(self, includeEnemies: bool) -> None:
+        self.mazeProvider.setRandomIncludeEnemies(includeEnemies)
 
     def _setupRandomMaze(self) -> None:
         self.mazeProvider.setupRandomMaze()
@@ -133,6 +143,7 @@ class GameEnvironment:
         poolSize: int = 20,
         minLength: int | None = None,
         maxLength: int | None = None,
+        includeEnemies: bool = False,
     ) -> None:
         if mode == "Fixed (Builder)" and not self.hasFixedMazeConfigured():
             raise RuntimeError("Fixed maze is not configured.")
@@ -141,6 +152,7 @@ class GameEnvironment:
             poolSize=poolSize,
             minLength=minLength,
             maxLength=maxLength,
+            includeEnemies=includeEnemies,
         )
 
     def pauseTrainingFor(self, profileName: str) -> None:
@@ -164,7 +176,15 @@ class GameEnvironment:
     def getCompleted(self, profileName: str) -> int:
         return self.botRuntime.getCompleted(profileName)
         
-    def setupNewProfile(self, profileName: str, botType: str, config: Any, rewardConfig: Any) -> None:
+    def setupNewProfile(
+        self,
+        profileName: str,
+        botType: str,
+        config: Any,
+        rewardConfig: Any,
+        *,
+        previousName: str | None = None,
+    ) -> None:
         """
         Set up a new bot profile and save it.
 
@@ -173,13 +193,27 @@ class GameEnvironment:
         :param config: Configuration for the bot.
         :param reward_config: Reward configuration for the bot.
         """
-        profile = BotProfile(profileName, botType, config, rewardConfig, BotStatistics(), {})
+        previousProfileName = str(previousName or "").strip()
+        statistics = BotStatistics()
+        botSpecificData: dict[str, Any] = {}
+        if previousProfileName and previousProfileName != profileName:
+            existingProfile = self.profileManager.loadProfile(previousProfileName)
+            statistics = existingProfile.statistics
+            botSpecificData = dict(existingProfile.botSpecificData)
+            self.linkedProfileService.renameLinkedProfiles(previousProfileName, profileName)
+            self.profileService.renameProfile(previousProfileName, profileName)
+        elif previousProfileName == profileName and previousProfileName:
+            existingProfile = self.profileManager.loadProfile(previousProfileName)
+            statistics = existingProfile.statistics
+            botSpecificData = dict(existingProfile.botSpecificData)
+
+        profile = BotProfile(profileName, botType, config, rewardConfig, statistics, botSpecificData)
         self.profileService.initializeProfile(profile)
         self.linkedProfileService.syncLinkedProfile(profile)
         # Only attempt to instantiate a bot if the type is registered
         try:
             if botType in self.botFactory.botRegistry:
-                self.setupBots(profile.botType, profile.name, config, rewardConfig, profile.statistics, profile.botSpecificData)
+                self.applyProfile(profile, previousName=previousProfileName or None)
         except Exception as e:
             if self.diagnostics is not None:
                 self.diagnostics.exception(
@@ -247,7 +281,12 @@ class GameEnvironment:
         profile = self.profileManager.loadProfile(profileName)
         self.applyProfile(profile)
 
-    def applyProfile(self, profile: BotProfile, loadCheckpoint: bool = True) -> int:
+    def applyProfile(
+        self,
+        profile: BotProfile,
+        loadCheckpoint: bool = True,
+        previousName: str | None = None,
+    ) -> int:
         """
         Apply a loaded profile to the environment.
 
@@ -256,6 +295,8 @@ class GameEnvironment:
         """
         # Check if a bot with the same profile name already exists
         botIndex = next((i for i, bot in enumerate(self.bots) if bot.profileName == profile.name), -1)
+        if botIndex == -1 and previousName:
+            botIndex = next((i for i, bot in enumerate(self.bots) if bot.profileName == previousName), -1)
         bot = self.botFactory.createBot(
             profile.botType,
             profile.name,

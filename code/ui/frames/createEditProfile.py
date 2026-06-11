@@ -1,12 +1,12 @@
 # pyright: reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownParameterType=false, reportMissingParameterType=false
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk
 from typing import Any
 
 from botConfigs import botConfigs, buildConfigForBotType
 from rewardSystem import RewardConfig
 from botProfile import BotProfile
-from ui.event_bus import PROFILE_SAVED
+from ui.eventBus import PROFILE_SAVED
 from ui.scrollable import VerticalScrolledFrame
 
 
@@ -100,6 +100,16 @@ class CreateEditProfileFrame(tk.Frame):
         buttonRow.pack(pady=6)
         ttk.Button(buttonRow, text="Save", command=self.saveProfile).pack(side=tk.LEFT, padx=6)
         ttk.Button(buttonRow, text="Cancel", command=self.cancel).pack(side=tk.LEFT, padx=6)
+        self.statusVar = tk.StringVar(value="Fill in the profile details, then save.")
+        self.statusLabel = tk.Label(
+            content,
+            textvariable=self.statusVar,
+            fg="#805b00",
+            justify=tk.LEFT,
+            anchor="w",
+            wraplength=920,
+        )
+        self.statusLabel.pack(fill=tk.X, padx=20, pady=(0, 8))
 
         ttk.Label(content, text="Profile Name:").pack()
         self.profileNameEntry = ttk.Entry(content)
@@ -132,6 +142,16 @@ class CreateEditProfileFrame(tk.Frame):
     @staticmethod
     def _normalizePenaltyValue(value: float) -> float:
         return 0.0 if value == 0 else -abs(float(value))
+
+    def _setStatus(self, message: str, *, tone: str = "info") -> None:
+        colors = {
+            "info": "#374151",
+            "success": "#166534",
+            "warning": "#805b00",
+            "error": "#b91c1c",
+        }
+        self.statusVar.set(message)
+        self.statusLabel.configure(fg=colors.get(tone, colors["info"]))
 
     # ----- UI building -----
     def updateBotConfigUi(self, event: Any = None) -> None:
@@ -248,20 +268,32 @@ class CreateEditProfileFrame(tk.Frame):
     # ----- Data binding -----
     def loadProfile(self, profile: Any = None) -> None:
         self.profile = profile
-        if profile:
-            self.profileNameEntry.delete(0, tk.END)
-            self.profileNameEntry.insert(0, profile.name)
-            self.botTypeEntry.set(profile.botType)
-            self.updateBotConfigUi()
+        self.profileNameEntry.delete(0, tk.END)
+        self.botTypeEntry.set("")
+        self.updateBotConfigUi()
+        self._setStatus("Fill in the profile details, then save.", tone="info")
+        if not profile:
+            return
 
-            if profile.config:
-                for paramKey, var in self.paramVars.items():
-                    value = getattr(profile.config, paramKey, "")
-                    var.set("" if value is None else value)
+        self.profileNameEntry.insert(0, profile.name)
+        self.botTypeEntry.set(profile.botType)
+        self.updateBotConfigUi()
 
-            if profile.rewardConfig:
-                for rewardKey, var in self.rewardVars.items():
-                    var.set(profile.rewardConfig.rewardModifiers.get(rewardKey, ""))
+        if profile.config:
+            for paramKey, var in self.paramVars.items():
+                value = getattr(profile.config, paramKey, "")
+                if paramKey == "macroOptionSet":
+                    if value == "naive":
+                        value = 1
+                    elif value == "momentum":
+                        value = 2
+                    elif value == "astar":
+                        value = 3
+                var.set("" if value is None else value)
+
+        if profile.rewardConfig:
+            for rewardKey, var in self.rewardVars.items():
+                var.set(profile.rewardConfig.rewardModifiers.get(rewardKey, ""))
 
     # ----- Actions -----
     def saveProfile(self) -> None:
@@ -269,19 +301,19 @@ class CreateEditProfileFrame(tk.Frame):
         botType = self.botTypeEntry.get()
 
         if botType not in botConfigs:
-            messagebox.showerror("Error", f"Unknown bot type: {botType}")
+            self._setStatus(f"Unknown bot type: {botType}", tone="error")
             return
         if not profileName.strip():
-            messagebox.showerror("Error", "Profile name cannot be empty.")
+            self._setStatus("Profile name cannot be empty.", tone="error")
             return
         import re
         if not re.fullmatch(r"[A-Za-z0-9_-]+", profileName.strip()):
-            messagebox.showerror("Error", "Profile name may only contain letters, numbers, '_' and '-'.")
+            self._setStatus("Profile name may only contain letters, numbers, '_' and '-'.", tone="error")
             return
         try:
             existing = set(self.controller.gameEnv.profileManager.listProfiles())
             if (self.profile is None or self.profile.name != profileName) and profileName in existing:
-                messagebox.showerror("Error", f"A profile named '{profileName}' already exists.")
+                self._setStatus(f"A profile named '{profileName}' already exists.", tone="error")
                 return
         except Exception:
             pass
@@ -305,7 +337,10 @@ class CreateEditProfileFrame(tk.Frame):
                 botParams[paramKey] = None
                 continue
             try:
-                botParams[paramKey] = float(txt)
+                if paramKey == "macroOptionSet":
+                    botParams[paramKey] = int(float(txt))
+                else:
+                    botParams[paramKey] = float(txt)
             except Exception:
                 paramErrors.append(paramKey)
 
@@ -341,15 +376,15 @@ class CreateEditProfileFrame(tk.Frame):
                 _format(paramErrors, "Invalid parameters"),
                 _format(rewardErrors, "Invalid rewards"),
             ]))
-            messagebox.showerror("Invalid Values", msg + "\n\nPlease fix these fields and try saving again.")
+            self._setStatus(msg + "\n\nPlease fix these fields and try saving again.", tone="error")
             return
 
         rewardClipKeys = ("rewardClipMin", "rewardClipMax")
         clipValues = [botParams.get(key) for key in rewardClipKeys]
         if any(value is None for value in clipValues) and any(value is not None for value in clipValues):
-            messagebox.showerror(
-                "Invalid Reward Clip",
+            self._setStatus(
                 "Reward Clip Min and Reward Clip Max must both be filled in or both left blank.",
+                tone="error",
             )
             return
 
@@ -364,18 +399,28 @@ class CreateEditProfileFrame(tk.Frame):
                 rewardsConfig[key] = self._normalizePenaltyValue(rewardsConfig[key])
 
         rawConfig = {k: v for k, v in botParams.items() if v is not None}
-        botConfig = buildConfigForBotType(botType, rawConfig)
+        try:
+            botConfig = buildConfigForBotType(botType, rawConfig)
+        except ValueError as e:
+            self._setStatus(str(e), tone="error")
+            return
 
         rewardConfigObj = RewardConfig()
         rewardConfigObj.rewardModifiers.update({k: str(v) for k, v in rewardsConfig.items()})
 
         try:
-            self.controller.gameEnv.setupNewProfile(profileName, botType, botConfig, rewardConfigObj)
+            previousName = self.profile.name if self.profile is not None else None
+            self.controller.gameEnv.setupNewProfile(
+                profileName,
+                botType,
+                botConfig,
+                rewardConfigObj,
+                previousName=previousName,
+            )
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to save profile: {e}")
+            self._setStatus(f"Failed to save profile: {e}", tone="error")
             return
 
-        messagebox.showinfo("Profile Saved", "Profile has been saved.")
         self.controller.eventBus.emit(PROFILE_SAVED, profileName=profileName)
         self.controller.showProfileManagement()
 

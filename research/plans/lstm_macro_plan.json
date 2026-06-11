@@ -1,0 +1,71 @@
+{
+  "experimentName": "lstm_macro_action_quality",
+  "branch": "main",
+  "dqnReplayWarmupPolicy": "disabled",
+  "seeds": [1001, 1002, 1003],
+  "seedLabels": ["S0", "S1", "S2"],
+  "agents": ["DQN_LSTM_PRIMITIVE", "DQN_LSTM_NAIVE_MACROS", "DQN_LSTM_ASTAR_MACROS", "DQN_LSTM_MOMENTUM_MACROS"],
+  "conditions": {
+    "FX_SMALL": {
+      "mode": "fixed",
+      "width": 8,
+      "height": 8,
+      "trainingEpisodes": 1000,
+      "evaluationEpisodes": 100,
+      "mazeId": "fixed_small",
+      "mazePath": "../benchmarks/fixed_small.json"
+    },
+    "FX_MED": {
+      "mode": "fixed",
+      "width": 15,
+      "height": 15,
+      "trainingEpisodes": 3000,
+      "evaluationEpisodes": 200,
+      "mazeId": "fixed_medium",
+      "mazePath": "../benchmarks/fixed_medium.json"
+    },
+    "FX_LARGE_25": {
+      "mode": "fixed",
+      "width": 25,
+      "height": 25,
+      "trainingEpisodes": 6000,
+      "evaluationEpisodes": 200,
+      "mazeId": "fixed_large_25",
+      "mazePath": "../benchmarks/fixed_large_25.json"
+    },
+    "POOL_MED_HELDOUT": {
+      "mode": "pool",
+      "width": 15,
+      "height": 15,
+      "poolSize": 15,
+      "trainingEpisodes": 3000,
+      "evaluationEpisodes": 50,
+      "evaluationEpisodesPerPoolMaze": 10,
+      "mazeIdPrefix": "pool",
+      "trainingMazePaths": [
+        "../benchmarks/pool_00.json",
+        "../benchmarks/pool_01.json",
+        "../benchmarks/pool_02.json",
+        "../benchmarks/pool_03.json",
+        "../benchmarks/pool_04.json",
+        "../benchmarks/pool_05.json",
+        "../benchmarks/pool_06.json",
+        "../benchmarks/pool_07.json",
+        "../benchmarks/pool_08.json",
+        "../benchmarks/pool_09.json",
+        "../benchmarks/pool_10.json",
+        "../benchmarks/pool_11.json",
+        "../benchmarks/pool_12.json",
+        "../benchmarks/pool_13.json",
+        "../benchmarks/pool_14.json"
+      ],
+      "evaluationMazePaths": [
+        "../benchmarks/pool_15.json",
+        "../benchmarks/pool_16.json",
+        "../benchmarks/pool_17.json",
+        "../benchmarks/pool_18.json",
+        "../benchmarks/pool_19.json"
+      ]
+    }
+  }
+}

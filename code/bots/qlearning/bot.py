@@ -7,21 +7,24 @@ from botStatistics import BotStatistics
 from baseBot import BaseBot
 from botTools import BotTools
 from bots.common.actions import ActionSpec, DEFAULT_PRIMITIVE_ACTIONS, DEFAULT_ATTACK_ACTIONS
-from bots.common.action_registry import ActionRegistry
+from bots.common.actionRegistry import ActionRegistry
 from bots.common.decision import ActionChoice, DecisionInput, LocalActionSpace
-from bots.common.options_library import defaultOptions
-from bots.common.step_result import StepResult
+from bots.common.optionsLibrary import defaultOptions
+from bots.common.stepResult import StepResult
 from environment.context import EnvironmentContext
-from environment.entity_factory import build_entity_registry
-from environment.entity_registry import EntityRegistry
+from environment.entityFactory import build_entity_registry
+from environment.entityRegistry import EntityRegistry
 from environment.movement import GridMovement4Way, buildDefaultMovementExecutors, buildAttackExecutors
-from environment.observation_encoder import ObservationEncoder
+from environment.observationEncoder import ObservationEncoder
 from environment.sensing import build_sensing_service
 from environment.traversal import build_traversal_policy
 from .config import QLearningConfig
-from bots.bot_status import BotStatus
+from bots.botStatus import BotStatus
+from bots.dqnlearning.planner import WarmupPlanner
+from bots.dqnlearning.warmupCoordinator import WarmupCoordinator
 from botFactory import BotCreateContext
-from services.episode_recorder import PostEpisodeRecorder
+from services.episodeRecorder import PostEpisodeRecorder
+from services.episodeResult import EpisodePersistencePolicy, EvaluationEpisodeDefinition
 from services.repository import ArtifactsRepository
 from services.runners import QLearningEpisodeRunner
 
@@ -47,9 +50,9 @@ class QLearning:
         self.gamma = qLearningConfig.discountFactor
         self.numActions = num_actions
         self.qTable: dict[tuple[Any, ...], np.ndarray] = {}
-        self.initialExplorationRate = 1.0
-        self.minExplorationRate = 0.1
-        self.explorationDecayRate = 0.0005
+        self.initialExplorationRate = float(getattr(qLearningConfig, "epsilonStart", 1.0))
+        self.minExplorationRate = float(getattr(qLearningConfig, "epsilonEnd", 0.05))
+        self.explorationDecaySteps = max(1, int(getattr(qLearningConfig, "epsilonDecaySteps", 100000)))
         self.totalSteps = 0
         self.usePositionInState = getattr(qLearningConfig, "usePositionInState", True)
         self._repo = repo
@@ -81,9 +84,11 @@ class QLearning:
         return ActionChoice(local_id=int(np.argmax(masked_q)))
 
     def explorationRate(self) -> float:
+        progress = min(1.0, float(self.totalSteps) / float(self.explorationDecaySteps))
         return max(
             self.minExplorationRate,
-            self.initialExplorationRate - self.explorationDecayRate * self.totalSteps,
+            self.initialExplorationRate
+            + (self.minExplorationRate - self.initialExplorationRate) * progress,
         )
 
     # ── Learning updates ──────────────────────────────────────────────────────
@@ -136,21 +141,19 @@ class QLearning:
 
     def saveQTable(self) -> None:
         if self._repo and self._profile:
-            try:
-                self._repo.saveQTable(self._profile, self.qTable)
-            except Exception:
-                pass
+            self._repo.saveQTable(self._profile, self.qTable)
 
     def loadQTable(self) -> None:
         if self._repo and self._profile:
-            try:
-                self.qTable = self._repo.loadQTable(self._profile) or {}
-            except Exception:
-                self.qTable = {}
+            self.qTable = self._repo.loadQTable(self._profile) or {}
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     def stateToKey(self, state: Any) -> tuple[Any, ...]:
+        if not isinstance(state, (tuple, list)):
+            return (state,)
+        if len(state) < 4:
+            return tuple(state)
         positionIndex, wallDistances, goalDirection, *rest = state
         entityFeatures = tuple(rest[0]) if rest else ()
         if self.usePositionInState:
@@ -208,17 +211,22 @@ class QLearningBot(BaseBot):
         executors = buildDefaultMovementExecutors(self._movementModel)
         for spec in DEFAULT_PRIMITIVE_ACTIONS:
             self._actionRegistry.registerPrimitive(spec, executors[spec.id])
-        if bool(getattr(config, "useAttackActions", False)):
+        if getattr(config, "useAttackActions", False):
             attack_executors = buildAttackExecutors()
             for spec in DEFAULT_ATTACK_ACTIONS:
                 self._actionRegistry.registerPrimitive(spec, attack_executors[spec.id])
-        if bool(getattr(config, "useMacroActions", False)):
+        if getattr(config, "useMacroActions", False):
             for option in defaultOptions():
                 self._actionRegistry.registerOption(option)
         # Wire context → registry (circular reference resolved after registry is built)
         self._context.setActionRegistry(self._actionRegistry)
         self._observationEncoder = ObservationEncoder(scale=float(max(maze.width, maze.height, 1)))
         self._syncEntitiesFromMaze()
+
+        self._knownOpen: set[tuple[int, int]] = set()
+        self._knownWalls: set[tuple[int, int]] = set()
+        self._seenGoals: set[tuple[int, int]] = set()
+        self._collectingWarmup: bool = False
 
         self.qLearning = QLearning(
             config,
@@ -229,11 +237,19 @@ class QLearningBot(BaseBot):
         self.state = self.calculateState()
         self.qLearning.loadQTable()
 
-        try:
-            self.repo.ensureMazeFile(profileName)
-            mazeData = self.repo.loadMazeData(profileName)
-        except Exception:
-            mazeData = {"highest": {"reward": float("-inf")}, "lowest": {"reward": float("inf")}}
+        _planner = WarmupPlanner(
+            maze=self.maze,
+            profileName=self.profileName,
+            tools=self.tools,
+            knownOpen=self._knownOpen,
+            knownWalls=self._knownWalls,
+            seenGoals=self._seenGoals,
+        )
+        self.warmupCoordinator = WarmupCoordinator(_planner)
+        self._observePosition(self.position)
+
+        self.repo.ensureMazeFile(profileName)
+        mazeData = self.repo.loadMazeData(profileName)
         self.highestReward = float(mazeData.get("highest", {}).get("reward", float("-inf")))
         self.lowestReward = float(mazeData.get("lowest", {}).get("reward", float("inf")))
 
@@ -280,12 +296,18 @@ class QLearningBot(BaseBot):
             if option is None:
                 raise KeyError(f"Unknown option action_id={semanticActionId}")
             cumulativeReward = 0.0
+            discountedReward = 0.0
             duration = 0
+            revisitCount = 0
+            reversalCount = 0
+            hitWallCount = 0
             done = False
             while not option.shouldTerminate(self._context, duration) and not done:
                 primitiveId = option.choosePrimitiveAction(self._context)
                 startPos = cast(tuple[int, int], self.position)
                 attempted = self._movementModel.candidatePosition(startPos, primitiveId)
+                wasReversal = self.previousPosition is not None and attempted == self.previousPosition
+                wasRevisit = attempted in self.statistics.getVisitedPositions()
                 rewardContext = self.rewardSystem.buildStepContext(
                     startPos,
                     attempted,
@@ -305,11 +327,25 @@ class QLearningBot(BaseBot):
                     )
                 )
                 primitiveResult = self._actionRegistry.executePrimitive(primitiveId, self._context)
-                stepReward = envReward + float(primitiveResult.reward) + float(
-                    option.intrinsicReward(self._context, primitiveResult)
+                hitWall = bool(primitiveResult.info.get("hit_wall", False))
+                self._observePosition(self.position)
+                if hitWall:
+                    self.warmupCoordinator.onWallDiscovered()
+                    wasReversal = False
+                    wasRevisit = False
+                stepReward = (
+                    envReward
+                    + float(primitiveResult.reward)
+                    + float(option.intrinsicReward(self._context, primitiveResult))
                 )
-                cumulativeReward += (self.qLearning.gamma ** duration) * stepReward
+                if not hitWall:
+                    stepReward += self.shapingPenalty(wasRevisit, wasReversal)
+                cumulativeReward += stepReward
+                discountedReward += (self.qLearning.gamma ** duration) * stepReward
                 duration += 1
+                revisitCount += 1 if wasRevisit else 0
+                reversalCount += 1 if wasReversal else 0
+                hitWallCount += 1 if hitWall else 0
                 done = bool(primitiveResult.done or self.position == self.maze.end)
                 if done:
                     break
@@ -317,22 +353,41 @@ class QLearningBot(BaseBot):
             return StepResult(
                 reward=cumulativeReward,
                 done=done,
-                info={"option": option.name, "action_key": option.name},
+                info={
+                    "hit_wall": hitWallCount > 0,
+                    "was_revisit": revisitCount > 0,
+                    "was_reversal": reversalCount > 0,
+                    "option": option.name,
+                    "action_key": option.name,
+                },
                 duration=duration,
+                trainingReward=discountedReward,
             )
         result = self._actionRegistry.executePrimitive(semanticActionId, self._context)
+        self._observePosition(self.position)
+        if bool(result.info.get("hit_wall", False)):
+            self.warmupCoordinator.onWallDiscovered()
         self.state = self.calculateState()
         return result
 
     def addReward(self, amount: float, reason: str = "") -> None:
         self.totalReward += amount
 
-    def shapingPenalty(self) -> float:
-        return 0.0
+    def shapingPenalty(self, wasRevisit: bool = False, wasReversal: bool = False) -> float:
+        penalty = 0.0
+        if wasRevisit:
+            penalty += float(getattr(self.config, "repeatVisitPenaltyScale", 0.0))
+        if wasReversal:
+            penalty += float(getattr(self.config, "immediateReversalPenalty", 0.0))
+        return penalty
 
     @property
     def isWarmingUp(self) -> bool:
-        return False
+        return bool(self._collectingWarmup)
+
+    @property
+    def usesMacroOnlyPolicy(self) -> bool:
+        return getattr(self.config, "useMacroOnlyPolicy", False)
 
     # ── State / observation ───────────────────────────────────────────────────
 
@@ -341,12 +396,32 @@ class QLearningBot(BaseBot):
             self._context,
             self._sensing,
             position=position,
-            include_entity_features=bool(getattr(self.config, "useEntityObservation", False)),
-            include_enemy_features=bool(getattr(self.config, "useEnemyObservation", False)),
+            include_entity_features=getattr(self.config, "useEntityObservation", False),
+            include_enemy_features=getattr(self.config, "useEnemyObservation", False),
         )
 
     def encodeState(self) -> tuple[Any, ...]:
         return self.calculateState()
+
+    def _observePosition(self, position: tuple[int, int]) -> None:
+        goal = self.maze.end
+        for row, col in self._sensing.visible_open_cells(position):
+            self._knownOpen.add((row, col))
+            self._knownWalls.discard((row, col))
+            if (row, col) == goal:
+                self._seenGoals.add((row, col))
+        for row, col in self._sensing.first_blocked_cells(position):
+            if (row, col) not in self._knownOpen:
+                self._knownWalls.add((row, col))
+
+    def selectWarmupAction(self, decision: Any, plannerLocal: int | None) -> ActionChoice:
+        mask = list(decision.action_mask)
+        if plannerLocal is not None and 0 <= plannerLocal < len(mask) and mask[plannerLocal]:
+            return ActionChoice(local_id=int(plannerLocal))
+        valid_ids = [i for i, v in enumerate(mask) if v]
+        if not valid_ids:
+            valid_ids = list(range(self._policyActionCount()))
+        return ActionChoice(local_id=int(np.random.choice(valid_ids)))
 
     def getBotSpecificData(self) -> dict[str, Any]:
         return {"q_table": self.qLearning.qTable}
@@ -381,6 +456,22 @@ class QLearningBot(BaseBot):
     def persistTrainingArtifacts(self) -> None:
         self.qLearning.saveQTable()
 
+    def getEvaluationEpisodeDefinition(self) -> EvaluationEpisodeDefinition:
+        return EvaluationEpisodeDefinition(
+            description=(
+                "Greedy tabular evaluation with learning disabled and epsilon forced to 0.0. "
+                "This bot does not schedule dedicated evaluation episodes during training."
+            ),
+            frequency=0,
+            is_dedicated_episode=False,
+            eval_epsilon=0.0,
+            persistence=EpisodePersistencePolicy(
+                save_maze_episode=False,
+                save_heatmap_stats=False,
+                append_reward=False,
+            ),
+        )
+
     # ── BaseBot public contract implementations ───────────────────────────────
 
     def isOptionAction(self, semanticId: int) -> bool:
@@ -390,26 +481,26 @@ class QLearningBot(BaseBot):
         return self._actionRegistry.executePrimitive(semanticId, self._context)
 
     def selectAction(self, decision: Any) -> Any:
+        warmupChoice = self.warmupCoordinator.selectAction(self, decision, training=True)
+        if warmupChoice is not None:
+            return warmupChoice
         autoAttackLocalId = self.autoAttackAdjacentEnemyLocalId(decision.actionSpace)
         if autoAttackLocalId is not None:
             return ActionChoice(local_id=autoAttackLocalId)
         return self.qLearning.chooseAction(decision)
 
     def getStatus(self) -> BotStatus:
-        try:
-            explorationRate = float(self.qLearning.explorationRate())
-        except Exception:
-            explorationRate = 0.0
+        explorationRate = float(self.qLearning.explorationRate())
         return BotStatus(
             episode_count=int(self.episodeCounter),
-            is_warming_up=False,
+            is_warming_up=bool(self._collectingWarmup),
             replay_size=0,
             warmup_required=0,
             current_exploration_rate=explorationRate,
             epsilon_is_manual=False,
-            checkpoint_frequency=0,
+            checkpoint_frequency=1,
             current_episode_steps=int(self.currentEpisodeSteps),
-            last_episode_success=bool(getattr(self, "lastEpisodeSuccess", False)),
+            last_episode_success=getattr(self, "lastEpisodeSuccess", False),
             artifact_save_label="Q-table",
         )
 
@@ -421,21 +512,26 @@ class QLearningBot(BaseBot):
         self.totalReward = 0.0
         self.currentEpisodeSteps = 0
         self._pushCooldownRemaining = 0
+        self._knownOpen.clear()
+        self._knownWalls.clear()
+        self._seenGoals.clear()
+        self.warmupCoordinator.reset()
         self._syncEntitiesFromMaze()
         self.state = self.calculateState()
+        self._observePosition(self.position)
 
     def onEpisodeStart(self, mode: str) -> None:
-        if mode not in {"training", "visualization"}:
+        if mode not in {"training", "visualization", "evaluation"}:
             raise ValueError(f"Unsupported episode mode for QLearningBot: {mode}")
 
     def onEpisodeStep(self, mode: str, stepIndex: int) -> None:
-        if mode not in {"training", "visualization"}:
+        if mode not in {"training", "visualization", "evaluation"}:
             raise ValueError(f"Unsupported episode mode for QLearningBot: {mode}")
         if stepIndex < 0:
             raise ValueError(f"step_index must be non-negative, got {stepIndex}")
 
     def onEpisodeEnd(self, mode: str, outcome: str) -> None:
-        if mode not in {"training", "visualization"}:
+        if mode not in {"training", "visualization", "evaluation"}:
             raise ValueError(f"Unsupported episode mode for QLearningBot: {mode}")
         if not outcome:
             raise ValueError("outcome must be a non-empty string")
@@ -470,8 +566,8 @@ class QLearningBot(BaseBot):
     def _buildPolicyActionSpace(self) -> LocalActionSpace:
         return self._actionRegistry.buildLocalActionSpace(
             self._context,
-            includePrimitives=not bool(getattr(self.config, "useMacroOnlyPolicy", False)),
-            includeOptions=bool(getattr(self.config, "useMacroActions", False)),
+            includePrimitives=not getattr(self.config, "useMacroOnlyPolicy", False),
+            includeOptions=getattr(self.config, "useMacroActions", False),
         )
 
     def _policyActionCount(self) -> int:

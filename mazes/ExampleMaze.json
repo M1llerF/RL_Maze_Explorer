@@ -2604,11 +2604,13 @@
     ]
   ],
   "start": [
-    1,
+    5,
     1
   ],
   "end": [
     47,
     47
-  ]
+  ],
+  "entities": [],
+  "label": "ExampleMaze.json"
 }

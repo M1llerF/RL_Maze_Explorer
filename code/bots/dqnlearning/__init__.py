@@ -1,17 +1,17 @@
 from .agent import DqnAgent, DqnDiagnostics
 from .bot import DQNBot
 from .checkpoint import CheckpointIO, CheckpointMeta
-from .checkpoint_service import DQNCheckpointService
+from .checkpointService import DQNCheckpointService
 from .config import DQNConfig
 from .encoder import EncoderSchemaMeta, StateEncoder
-from .hrl_agent import HierarchicalDqnAgent
+from .hrlAgent import HierarchicalDqnAgent
 from .model import DqnModel
 from .planner import WarmupPlanner
 from .replay import ReplayStore, UniformReplayStore
 from .spec import BOT_SPEC
 from .warmup import PlannerObservationContext, PlannerWarmupPolicy
-from .warmup_coordinator import WarmupCoordinator
-from .warmup_store import WarmupCollector, WarmupStore, WarmupStoreMeta
+from .warmupCoordinator import WarmupCoordinator
+from .warmupStore import WarmupCollector, WarmupStore, WarmupStoreMeta
 
 BOT_TYPE = "DQNBot"
 BOT_CLASS = DQNBot

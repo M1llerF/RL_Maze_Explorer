@@ -6,7 +6,7 @@ from bots.common.actions import (
     DIRECTION_DELTAS, UP, DOWN, LEFT, RIGHT, NAME_TO_DIRECTION,
     ATTACK_UP, ATTACK_DOWN, ATTACK_LEFT, ATTACK_RIGHT,
 )
-from bots.common.step_result import StepResult
+from bots.common.stepResult import StepResult
 from environment.context import ACTION_APPLIED, COLLISION, GOAL_REACHED, ENEMY_CONTACT, ENEMY_KILLED, ENEMY_MOVED
 
 if TYPE_CHECKING:
@@ -56,9 +56,58 @@ class GridMovement4Way(MovementModel):
         direction = _resolve_direction(direction)
         target = self.candidatePosition(context.position, direction)
 
-        # Walking into an alive enemy is lethal for the bot.
+        # Walking into an alive enemy either pushes it one tile or kills the bot if push is unavailable.
         alive_enemy = _aliveEnemyAt(context, target)
         if alive_enemy is not None:
+            enemyBehavior = getattr(alive_enemy, "_behavior", {})
+            isPushableEnemy = str(enemyBehavior.get("kind", "stationary")) != "chase"
+            if context.isPushReady and isPushableEnemy:
+                pushed = self.candidatePosition(target, direction)
+                canPush = (
+                    context.isValidPosition(pushed)
+                    and not context.entityRegistry.blocksMovement(
+                        pushed,
+                        context,
+                        direction,
+                        exclude_entity_id=alive_enemy.id,
+                    )
+                    and _aliveEnemyAt(context, pushed) is None
+                )
+                if canPush:
+                    context.entityRegistry.move(alive_enemy.id, pushed)
+                    context.emit(ENEMY_MOVED, enemy_id=alive_enemy.id, new_position=pushed, cause="push")
+                    enemyKills = 0
+                else:
+                    alive_enemy.receiveAttack(context)
+                    context.emit(ENEMY_KILLED, enemy_id=alive_enemy.id, position=target, cause="push_wall")
+                    enemyKills = 1
+
+                context.consumePushCooldown()
+                context.moveAgentTo(target)
+                context.syncEntitiesToMaze()
+                done = context.isAtGoal()
+                context.emit(
+                    ACTION_APPLIED,
+                    previous_position=(target[0] - DIRECTION_DELTAS[direction][0], target[1] - DIRECTION_DELTAS[direction][1]),
+                    new_position=target,
+                    direction=direction,
+                    damage=0.0,
+                    goal_reached=done,
+                )
+                if done:
+                    context.emit(GOAL_REACHED, position=target, direction=direction)
+                return StepResult(
+                    reward=0.0,
+                    done=done,
+                    info={
+                        "hit_wall": False,
+                        "direction": direction,
+                        "damage": 0.0,
+                        "enemy_kills": enemyKills,
+                    },
+                    duration=1,
+                )
+
             damage = float(alive_enemy.damageAmount(context))
             context.emit(
                 ENEMY_CONTACT,
@@ -163,10 +212,10 @@ class AttackActionExecutor:
     Executes a directional attack in place (bot does not move).
 
     If an alive enemy occupies the adjacent cell:
-      - Attempts to push enemy one further cell in the same direction.
-      - Push to open space: enemy displaced then killed (1-hit).
-      - Push into wall / obstacle: enemy dies in place.
-      - Either way, enemy always dies. Bot stays put.
+      - Attempts to push enemy up to three cells in the same direction.
+      - All three cells open: enemy slides 3 tiles and survives (not yet cornered).
+      - Hits a wall within 3 tiles: enemy slides to the last open cell and dies.
+      - First cell is wall: enemy dies in place.
     If no enemy: wasted action (0 reward).
     """
 
@@ -199,16 +248,27 @@ class AttackActionExecutor:
         if stats is not None and hasattr(stats, "timesHitEnemy"):
             stats.timesHitEnemy = int(getattr(stats, "timesHitEnemy", 0)) + 1
 
-        push_target = (target[0] + dr, target[1] + dc)
-        can_push = (
-            context.isValidPosition(push_target)
-            and not context.entityRegistry.blocksMovement(push_target, context, self._direction)
+        push1 = (target[0] + dr, target[1] + dc)
+        push2 = (target[0] + 2 * dr, target[1] + 2 * dc)
+        push3 = (target[0] + 3 * dr, target[1] + 3 * dc)
+
+        can_push1 = (
+            context.isValidPosition(push1)
+            and not context.entityRegistry.blocksMovement(push1, context, self._direction)
+        )
+        can_push2 = can_push1 and (
+            context.isValidPosition(push2)
+            and not context.entityRegistry.blocksMovement(push2, context, self._direction)
+        )
+        can_push3 = can_push2 and (
+            context.isValidPosition(push3)
+            and not context.entityRegistry.blocksMovement(push3, context, self._direction)
         )
 
-        if can_push:
-            # Open space behind enemy — displaced, survives
-            context.entityRegistry.move(enemy.id, push_target)
-            context.emit(ENEMY_MOVED, enemy_id=enemy.id, new_position=push_target, cause="sword_push")
+        if can_push3:
+            # All three cells open — enemy slides 3 tiles and survives (not yet cornered)
+            context.entityRegistry.move(enemy.id, push3)
+            context.emit(ENEMY_MOVED, enemy_id=enemy.id, new_position=push3, cause="sword_push")
             context.syncEntitiesToMaze()
             return StepResult(
                 reward=0.0,
@@ -216,8 +276,34 @@ class AttackActionExecutor:
                 info={"attack_hit": True, "enemy_kills": 0},
                 duration=1,
             )
+        elif can_push2:
+            # Two cells open, third is wall — enemy slides 2 tiles then dies
+            context.entityRegistry.move(enemy.id, push2)
+            context.emit(ENEMY_MOVED, enemy_id=enemy.id, new_position=push2, cause="sword_push")
+            enemy.receiveAttack(context)
+            context.emit(ENEMY_KILLED, enemy_id=enemy.id, position=push2, cause="sword_push_wall")
+            context.syncEntitiesToMaze()
+            return StepResult(
+                reward=0.0,
+                done=False,
+                info={"attack_hit": True, "enemy_kills": 1},
+                duration=1,
+            )
+        elif can_push1:
+            # First cell open, second is wall — enemy slides 1 tile then dies
+            context.entityRegistry.move(enemy.id, push1)
+            context.emit(ENEMY_MOVED, enemy_id=enemy.id, new_position=push1, cause="sword_push")
+            enemy.receiveAttack(context)
+            context.emit(ENEMY_KILLED, enemy_id=enemy.id, position=push1, cause="sword_push_wall")
+            context.syncEntitiesToMaze()
+            return StepResult(
+                reward=0.0,
+                done=False,
+                info={"attack_hit": True, "enemy_kills": 1},
+                duration=1,
+            )
         else:
-            # Wall behind enemy — dies from impact
+            # Wall immediately behind enemy — dies in place
             enemy.receiveAttack(context)
             context.emit(ENEMY_KILLED, enemy_id=enemy.id, position=target, cause="sword_push_wall")
             context.syncEntitiesToMaze()

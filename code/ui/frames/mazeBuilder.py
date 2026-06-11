@@ -1,15 +1,17 @@
 # pyright: reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownParameterType=false, reportMissingParameterType=false, reportUnknownLambdaType=false, reportConstantRedefinition=false
 import json
+import os
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from tkinter import ttk, filedialog
 from pathfinding import Pathfinding
 from environment.entities import normalize_enemy_behavior
+from ui.eventBus import FIXED_MAZE_SELECTED
 
 
 class MazeBuilderFrame(tk.Frame):
     """
     Pro Maze Builder
-    - Tools: Wall, Path, Erase, Start, End, Pan, Line, Rect
+    - Tools: Wall, Erase, Start, End, Enemy, Pan, Line, Rect
     - Left click: paint/apply tool, Right drag: erase
     - Mouse wheel: zoom, Space: hold to pan, or use Pan tool
     - Ctrl+Z / Ctrl+Y: Undo/Redo; 1..8 to switch tools; P to toggle path preview
@@ -20,15 +22,15 @@ class MazeBuilderFrame(tk.Frame):
         from ui.tools import TOOLREGISTRY
         TOOLS = tuple(list(TOOLREGISTRY.keys()) + ["Pan", "Line", "Rect"])
     except Exception:
-        TOOLS = ("Wall", "Path", "Erase", "Start", "End", "Pan", "Line", "Rect")
+        TOOLS = ("Wall", "Erase", "Start", "End", "Enemy", "Pan", "Line", "Rect")
 
     def __init__(self, parent, controller):
         super().__init__(parent)
         self.controller = controller
 
         # --- State ---
-        self.widthVar = tk.IntVar(value=20)
-        self.heightVar = tk.IntVar(value=20)
+        self.widthVar = tk.IntVar(value=21)
+        self.heightVar = tk.IntVar(value=21)
         self.toolVar = tk.StringVar(value="Wall")
         self.cellPxVar = tk.IntVar(value=25)
         self.showGridVar = tk.BooleanVar(value=True)
@@ -47,7 +49,6 @@ class MazeBuilderFrame(tk.Frame):
 
         # Panning state
         self._panning = False
-        self._panLast = None
         self._spacePan = False
 
         # Drag helpers for Line/Rect preview
@@ -56,6 +57,7 @@ class MazeBuilderFrame(tk.Frame):
 
         # Path preview cache
         self._pathCells = None  # list[(y,x)] or None
+        self._fixedMazeLabel = "Builder Maze"
 
         # History/initialization guard to keep Ctrl+Z from erasing on first load
         self._hasInitialized = False
@@ -134,12 +136,6 @@ class MazeBuilderFrame(tk.Frame):
         canvasFrame.rowconfigure(0, weight=1)
         canvasFrame.columnconfigure(0, weight=1)
 
-        # Status bar
-        status = ttk.Frame(self)
-        status.pack(fill=tk.X, padx=10, pady=(0, 10))
-        self.statusVar = tk.StringVar(value="Ready")
-        ttk.Label(status, textvariable=self.statusVar, anchor="w").pack(side=tk.LEFT, fill=tk.X, expand=True)
-
         # Canvas bindings
         self.canvas.bind("<Button-1>", self._onLeftClick)
         self.canvas.bind("<B1-Motion>", self._onLeftDrag)
@@ -185,9 +181,10 @@ class MazeBuilderFrame(tk.Frame):
         self.bind_all("2", lambda e: self.toolVar.set("Erase"))
         self.bind_all("3", lambda e: self.toolVar.set("Start"))
         self.bind_all("4", lambda e: self.toolVar.set("End"))
-        self.bind_all("5", lambda e: self.toolVar.set("Pan"))
-        self.bind_all("6", lambda e: self.toolVar.set("Line"))
-        self.bind_all("7", lambda e: self.toolVar.set("Rect"))
+        self.bind_all("5", lambda e: self.toolVar.set("Enemy"))
+        self.bind_all("6", lambda e: self.toolVar.set("Pan"))
+        self.bind_all("7", lambda e: self.toolVar.set("Line"))
+        self.bind_all("8", lambda e: self.toolVar.set("Rect"))
         # Zoom shortcuts
         self.bind_all("<Control-plus>", lambda e: self._bumpZoom(+1))
         self.bind_all("<Control-KP_Add>", lambda e: self._bumpZoom(+1))
@@ -205,9 +202,9 @@ class MazeBuilderFrame(tk.Frame):
         self.start = (0, 0)
         self.end = (h - 1, w - 1)
         self.entities = []
+        self._fixedMazeLabel = "Builder Maze"
         self._redoStack.clear()
         self._recomputePath()
-        self._updateStatus()
         self.draw()
         self._hasInitialized = True
 
@@ -219,6 +216,7 @@ class MazeBuilderFrame(tk.Frame):
         w = len(self.gridData[0])
         self.gridData = [[0 for _ in range(w)] for _ in range(h)]
         self._redoStack.clear()
+        self._fixedMazeLabel = "Builder Maze"
         self._recomputePath()
         self.draw()
 
@@ -242,11 +240,12 @@ class MazeBuilderFrame(tk.Frame):
             self.start = tuple(state['start']) if state['start'] else (0, 0)
             self.end = tuple(state['end']) if state['end'] else (len(self.gridData)-1, len(self.gridData[0])-1)
             self.entities = list(state.get('entities', []))
+            self._fixedMazeLabel = "Generated Maze"
             self._redoStack.clear()
             self._recomputePath()
             self.draw()
-        except Exception as e:
-            messagebox.showerror("Generate Failed", f"Could not generate maze: {e}")
+        except Exception:
+            pass
 
     def loadMaze(self):
         path = filedialog.askopenfilename(title="Load Maze", filetypes=[("JSON", "*.json"), ("All Files", "*.*")])
@@ -268,11 +267,12 @@ class MazeBuilderFrame(tk.Frame):
             self.start = start
             self.end = end
             self.entities = entities
+            self._fixedMazeLabel = os.path.basename(path) or "Loaded Maze"
             self._redoStack.clear()
             self._recomputePath()
             self.draw()
-        except Exception as e:
-            messagebox.showerror("Load Failed", f"Could not load maze: {e}")
+        except Exception:
+            pass
 
     def saveMaze(self):
         if not self.validateStartEnd(showBanner=True):
@@ -284,22 +284,19 @@ class MazeBuilderFrame(tk.Frame):
             data = self.getState()
             with open(path, 'w') as f:
                 json.dump(data, f, indent=2)
-            messagebox.showinfo("Saved", f"Maze saved to {path}")
-        except Exception as e:
-            messagebox.showerror("Save Failed", f"Could not save maze: {e}")
+        except Exception:
+            pass
 
     def useInTraining(self):
         if not self.validateStartEnd(showBanner=True):
             return
         state = self.getState()
         try:
-            self.controller.gameEnv.setFixedMaze(state)
-            messagebox.showinfo(
-                "Fixed Maze Enabled",
-                "This maze will be used for training when 'Maze Source' is set to 'Fixed (Builder)'."
-            )
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to set fixed maze: {e}")
+            label = str(self._fixedMazeLabel or "Builder Maze")
+            self.controller.gameEnv.setFixedMaze(state, label=label)
+            self.controller.eventBus.emit(FIXED_MAZE_SELECTED, label=label)
+        except Exception:
+            pass
 
     # ------------- History (Undo/Redo) -------------
     def _pushHistory(self):
@@ -338,7 +335,7 @@ class MazeBuilderFrame(tk.Frame):
             self.start = tuple(state.get('start')) if state.get('start') is not None else (0, 0)
             self.end = tuple(state.get('end')) if state.get('end') is not None else (len(self.gridData)-1, len(self.gridData[0])-1)
             self.entities = list(state.get('entities', []))
-            self._updateStatus()
+            self._fixedMazeLabel = str(state.get("label", self._fixedMazeLabel or "Builder Maze"))
         except Exception:
             pass
 
@@ -351,6 +348,7 @@ class MazeBuilderFrame(tk.Frame):
             'start': list(self.start),
             'end': list(self.end),
             'entities': list(self.entities),
+            'label': str(self._fixedMazeLabel or "Builder Maze"),
         }
 
     def validateStartEnd(self, showBanner: bool = False) -> bool:
@@ -470,14 +468,6 @@ class MazeBuilderFrame(tk.Frame):
         return path if path else None
 
     # ------------- Utils -------------
-    def _updateStatus(self, cursor=""):
-        h = len(self.gridData)
-        w = len(self.gridData[0]) if h else 0
-        base = f"Tool: {self.toolVar.get()} | Start: {self.start[::-1]} | End: {self.end[::-1]} | Size: {w}×{h}"
-        if self._pathCells:
-            base += f" | Path length: {len(self._pathCells) - 1}"
-        self.statusVar.set(cursor if cursor else base)
-
     def _showBanner(self, msg):
         self.bannerVar.set(msg)
         if not self.banner.winfo_ismapped():
@@ -543,6 +533,11 @@ class MazeBuilderFrame(tk.Frame):
         self._recomputePath()
 
     def _onLeftClick(self, event):
+        if self.toolVar.get() == "Pan" or self._spacePan:
+            self._panning = True
+            self.canvas.scan_mark(event.x, event.y)
+            self.canvas.configure(cursor="fleur")
+            return
         self._pushHistory()
         y, x = self._canvasToCell(event)
         if self.toolVar.get() in ("Line", "Rect"):
@@ -552,6 +547,9 @@ class MazeBuilderFrame(tk.Frame):
         self.draw()
 
     def _onLeftDrag(self, event):
+        if self._panning:
+            self.canvas.scan_dragto(event.x, event.y, gain=1)
+            return
         if self.toolVar.get() in ("Line", "Rect"):
             y, x = self._canvasToCell(event)
             self.draw(previewTarget=(y, x))
@@ -561,6 +559,10 @@ class MazeBuilderFrame(tk.Frame):
         self.draw()
 
     def _onLeftRelease(self, event):
+        if self._panning and (self.toolVar.get() == "Pan" or self._spacePan):
+            self._panning = False
+            self.canvas.configure(cursor="")
+            return
         if not self._dragOriginCell:
             return
         y1, x1 = self._canvasToCell(event)
@@ -626,20 +628,13 @@ class MazeBuilderFrame(tk.Frame):
         if self.toolVar.get() != "Pan" and not self._spacePan:
             return
         self._panning = True
-        self._panLast = (event.x, event.y)
+        self.canvas.scan_mark(event.x, event.y)
         self.canvas.configure(cursor="fleur")
 
     def _onPanDrag(self, event):
         if not self._panning:
             return
-        if self._panLast is None:
-            self._panLast = (event.x, event.y)
-            return
-        dx = self._panLast[0] - event.x
-        dy = self._panLast[1] - event.y
-        self.canvas.xview_scroll(int(dx / 2), "units")
-        self.canvas.yview_scroll(int(dy / 2), "units")
-        self._panLast = (event.x, event.y)
+        self.canvas.scan_dragto(event.x, event.y, gain=1)
 
     def _onPanEnd(self, event):
         if self._panning:
@@ -647,8 +642,7 @@ class MazeBuilderFrame(tk.Frame):
             self.canvas.configure(cursor="")
 
     def _onMotion(self, event):
-        y, x = self._canvasToCell(event)
-        self._updateStatus(f"Cursor: ({x}, {y})")
+        pass
 
     def _onZoom(self, event):
         delta = 1 if (getattr(event, 'delta', 0) > 0 or getattr(event, 'num', None) == 4) else -1

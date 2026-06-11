@@ -54,8 +54,8 @@ class DiagnosticsService:
         for callback in subscribers:
             try:
                 callback(event)
-            except Exception:
-                continue
+            except Exception as exc:
+                print(f"[DiagnosticsService] Subscriber {callback!r} raised: {exc}")
         return event
 
     @staticmethod

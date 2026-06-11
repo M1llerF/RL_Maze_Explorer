@@ -66,7 +66,7 @@ def runProfileEpisodes(profileName: str, episodes: int) -> Dict[str, Any]:
             "steps_unique": int(stepsUnique),
             "steps_revisited": int(stepsRevisited),
             "walls_hit": int(wallsHit),
-            "q_table_states": int(len(bot.qLearning.qTable)),
+            "q_table_states": len(bot.qLearning.qTable),
             "unique_vs_optimal": float(stepsUnique / optimalLen) if optimalLen > 0 else 0.0,
         })
 
@@ -139,13 +139,13 @@ def main() -> None:
     args = parser.parse_args()
     profileArg = str(args.profile)
     episodesArg = int(args.episodes)
-    createArg = bool(args.create)
-    saveJsonArg = bool(args.save_json)
+    createArg = args.create
+    saveJsonArg = args.save_json
     botArg = str(args.bot)
     lrArg = float(args.lr)
     gammaArg = float(args.gamma)
-    noPosArg = bool(args.no_pos)
-    potentialArg = bool(args.potential)
+    noPosArg = args.no_pos
+    potentialArg = args.potential
     progressScaleArg = float(args.progressScale)
 
     if createArg:

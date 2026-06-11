@@ -1,6 +1,6 @@
 # pyright: reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownParameterType=false, reportMissingParameterType=false, reportUnknownLambdaType=false
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk
 from typing import Any
 
 import matplotlib.colors as mcolors
@@ -9,8 +9,8 @@ import numpy as np
 
 from displayTools import DisplayTools
 from rewardGrapher import RewardGrapher
-from services.visualization_service import VisualizationSnapshot, VisualizationService
-from ui.event_bus import PROFILE_SAVED, PROFILE_DELETED
+from services.visualizationService import VisualizationSnapshot, VisualizationService
+from ui.eventBus import PROFILE_SAVED, PROFILE_DELETED
 from visualizationStrategy import DefaultVisualizationStrategy
 
 
@@ -46,13 +46,18 @@ class VisualizationWindow(tk.Toplevel):
             command=self._applyDebugToggle,
         )
         self.debugCheck.pack(side=tk.LEFT, padx=5)
+        self.botViewVar = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            controls,
+            text="Bot View",
+            variable=self.botViewVar,
+        ).pack(side=tk.LEFT, padx=5)
         self.paused = False
         self.pauseBtn = ttk.Button(controls, text="Pause", command=self.togglePause)
         self.pauseBtn.pack(side=tk.LEFT, padx=5)
 
         self.afterId = None
         self.visualize = True
-        self._attackFlashes: dict[tuple[int, int], int] = {}
         self.protocol("WM_DELETE_WINDOW", self.onClose)
 
         try:
@@ -60,7 +65,6 @@ class VisualizationWindow(tk.Toplevel):
         except Exception:
             pass
         self._applyDebugToggle()
-        self._subscribeAttackEvents()
 
         self.updateVisualization()
 
@@ -78,21 +82,6 @@ class VisualizationWindow(tk.Toplevel):
         snapshot = self._visualizationService.build_snapshot(self.profileName, bot)
         self.renderVisualizationSnapshot(snapshot)
         self.afterId = self.after(100, self.updateVisualization)
-
-    def _subscribeAttackEvents(self) -> None:
-        try:
-            from environment.context import ENEMY_KILLED
-            bot = self.gameEnv.bots[self.profileIndex]
-            context = getattr(bot, "_context", None)
-            if context is not None:
-                context.on(ENEMY_KILLED, lambda **p: self._onEnemyKilled(p))
-        except Exception:
-            pass
-
-    def _onEnemyKilled(self, payload: dict) -> None:
-        pos = payload.get("position")
-        if isinstance(pos, (tuple, list)) and len(pos) == 2:
-            self._attackFlashes[(int(pos[0]), int(pos[1]))] = 5
 
     def togglePause(self) -> None:
         self.paused = not self.paused
@@ -127,9 +116,18 @@ class VisualizationWindow(tk.Toplevel):
                 heatmap[row, col] = count
         maxHeat = heatmap.max() if heatmap.max() > 0 else 1
         cmap = plt.get_cmap("Reds")
+        bot_view_var = getattr(self, "botViewVar", None)
+        bot_view = bool(bot_view_var.get()) if bot_view_var is not None else False
+        known_open: frozenset[tuple[int, int]] | None = (
+            snapshot.bot_known_open if bot_view and snapshot.bot_known_open is not None else None
+        )
+        observed_enemy_positions: frozenset[tuple[int, int]] | None = (
+            snapshot.bot_observed_enemy_positions if bot_view else None
+        )
         for y in range(height):
             for x in range(width):
-                if grid[y][x] == 1:
+                cell = (y, x)
+                if grid[y][x] == 1 or (known_open is not None and cell not in known_open):
                     self.canvas.create_rectangle(x * cellWidth, y * cellHeight,
                                                  (x + 1) * cellWidth, (y + 1) * cellHeight,
                                                  fill="black")
@@ -140,15 +138,6 @@ class VisualizationWindow(tk.Toplevel):
                         self.canvas.create_rectangle(x * cellWidth, y * cellHeight,
                                                      (x + 1) * cellWidth, (y + 1) * cellHeight,
                                                      fill=color, outline=color)
-        for row, col in snapshot.path or []:
-            self.canvas.create_rectangle(
-                col * cellWidth,
-                row * cellHeight,
-                (col + 1) * cellWidth,
-                (row + 1) * cellHeight,
-                outline="#f4b400",
-                width=2,
-            )
         if snapshot.maze_start is not None:
             start = snapshot.maze_start
             self.canvas.create_rectangle(start[1] * cellWidth, start[0] * cellHeight,
@@ -156,10 +145,13 @@ class VisualizationWindow(tk.Toplevel):
                                          fill="blue")
         if snapshot.maze_end is not None:
             end = snapshot.maze_end
-            self.canvas.create_rectangle(end[1] * cellWidth, end[0] * cellHeight,
-                                         (end[1] + 1) * cellWidth, (end[0] + 1) * cellHeight,
-                                         fill="green")
+            if known_open is None or end in known_open:
+                self.canvas.create_rectangle(end[1] * cellWidth, end[0] * cellHeight,
+                                             (end[1] + 1) * cellWidth, (end[0] + 1) * cellHeight,
+                                             fill="green")
         for enemy in snapshot.enemies:
+            if observed_enemy_positions is not None and enemy.position not in observed_enemy_positions:
+                continue
             er, ec = enemy.position
             x0, y0 = ec * cellWidth, er * cellHeight
             x1, y1 = (ec + 1) * cellWidth, (er + 1) * cellHeight
@@ -172,26 +164,6 @@ class VisualizationWindow(tk.Toplevel):
                 )
             else:
                 self.canvas.create_rectangle(x0, y0, x1, y1, fill="#616161", outline="#424242")
-        # Attack flash: bright burst at killed-enemy positions, decays over 5 frames
-        flashes = getattr(self, "_attackFlashes", {})
-        expired = [pos for pos, ttl in flashes.items() if ttl <= 0]
-        for pos in expired:
-            del flashes[pos]
-        for (fr, fc), ttl in list(flashes.items()):
-            intensity = ttl / 5.0
-            x0, y0 = fc * cellWidth, fr * cellHeight
-            x1, y1 = (fc + 1) * cellWidth, (fr + 1) * cellHeight
-            pad = max(1.0, min(cellWidth, cellHeight) * 0.08 * (1.0 - intensity))
-            self.canvas.create_oval(
-                x0 + pad, y0 + pad, x1 - pad, y1 - pad,
-                fill="#ffeb3b", outline="#ff6f00", width=max(1, int(2 * intensity)),
-            )
-            cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
-            arm = min(cellWidth, cellHeight) * 0.35 * intensity
-            self.canvas.create_line(cx - arm, cy, cx + arm, cy, fill="white", width=max(1, int(2 * intensity)))
-            self.canvas.create_line(cx, cy - arm, cx, cy + arm, fill="white", width=max(1, int(2 * intensity)))
-            flashes[(fr, fc)] -= 1
-
         botPosition = snapshot.bot_position
         self.canvas.create_oval(botPosition[1] * cellWidth, botPosition[0] * cellHeight,
                                 (botPosition[1] + 1) * cellWidth, (botPosition[0] + 1) * cellHeight,
@@ -255,6 +227,16 @@ class VisualizationFrame(tk.Frame):
         self.profileSelect.pack()
 
         ttk.Button(self.scrollableFrame, text="Load Profile", command=self.loadProfile).pack(pady=10)
+        self.statusVar = tk.StringVar(value="Select a profile to load its saved artifacts.")
+        self.statusLabel = tk.Label(
+            self.scrollableFrame,
+            textvariable=self.statusVar,
+            fg="#805b00",
+            justify=tk.LEFT,
+            anchor="w",
+            wraplength=940,
+        )
+        self.statusLabel.pack(fill=tk.X, padx=20, pady=(0, 8))
         self.heatmapFrame = tk.Frame(self.scrollableFrame)
         self.heatmapFrame.pack(pady=10)
         ttk.Label(self.heatmapFrame, text="Latest Maze").grid(row=0, column=0, pady=10)
@@ -269,7 +251,7 @@ class VisualizationFrame(tk.Frame):
         ttk.Label(self.scrollableFrame, text="Reward Graph Visualization:").pack(pady=10)
         self.rewardCanvas = tk.Canvas(self.scrollableFrame, width=800, height=400)
         self.rewardCanvas.pack(pady=10)
-        ttk.Label(self.scrollableFrame, text="Q-Table Visualization:").pack(pady=10)
+        ttk.Label(self.scrollableFrame, text="Policy Snapshot:").pack(pady=10)
         self.qtableOutput = tk.Text(self.scrollableFrame, height=10, width=50)
         self.qtableOutput.pack(pady=10)
         self.qtableScrollbar = ttk.Scrollbar(self.scrollableFrame, command=self.qtableOutput.yview)
@@ -292,16 +274,27 @@ class VisualizationFrame(tk.Frame):
         profiles = self.controller.gameEnv.profileManager.listProfiles()
         self.profileSelect['values'] = profiles
 
+    def _setStatus(self, message: str, *, tone: str = "info") -> None:
+        colors = {
+            "info": "#374151",
+            "success": "#166534",
+            "warning": "#805b00",
+            "error": "#b91c1c",
+        }
+        self.statusVar.set(message)
+        self.statusLabel.configure(fg=colors.get(tone, colors["info"]))
+
     def loadProfile(self) -> None:
         selectedProfile = self.profileSelect.get()
         if not selectedProfile:
-            messagebox.showerror("Error", "No profile selected.")
+            self._setStatus("Select a profile before loading a visualization.", tone="error")
             return
         profile = self.controller.gameEnv.profileManager.loadProfile(selectedProfile)
         profileIndex = self.controller.gameEnv.applyProfile(profile)
         bot = self.controller.gameEnv.bots[profileIndex]
         snapshot = self._visualizationService.build_snapshot(selectedProfile, bot)
         self._visualizationStrategy.visualize(self, snapshot)
+        self._setStatus(f"Loaded saved artifacts for {selectedProfile}.", tone="success")
 
     def renderVisualizationSnapshot(self, snapshot: VisualizationSnapshot) -> None:
         self._renderHeatmapSnapshot(self.heatmapCanvasLatest, snapshot.latest)
@@ -351,7 +344,32 @@ class VisualizationFrame(tk.Frame):
                 if rankedActions:
                     self.qtableOutput.insert(tk.END, f"  Actions: {rankedActions}\n\n")
         else:
-            self.qtableOutput.insert(tk.END, "No tabular Q-table available for this bot.\n")
+            self.qtableOutput.insert(
+                tk.END,
+                "No tabular Q-table is available for this bot.\n\n",
+            )
+            self.qtableOutput.insert(tk.END, f"Bot Type: {snapshot.bot_type or 'Unknown'}\n")
+            self.qtableOutput.insert(tk.END, f"Policy Mode: {snapshot.policy_mode or 'Unknown'}\n")
+            status = dict(snapshot.bot_status or {})
+            diagnostics = dict(snapshot.agent_diagnostics or {})
+            if "current_exploration_rate" in status:
+                self.qtableOutput.insert(
+                    tk.END,
+                    f"Epsilon: {float(status['current_exploration_rate']):.4f}\n",
+                )
+            if "replay_size" in status:
+                self.qtableOutput.insert(tk.END, f"Replay Size: {status['replay_size']}\n")
+            if "warmup_required" in status:
+                self.qtableOutput.insert(tk.END, f"Warmup Target: {status['warmup_required']}\n")
+            if "trainingUpdates" in diagnostics:
+                self.qtableOutput.insert(tk.END, f"Training Updates: {diagnostics['trainingUpdates']}\n")
+            if "lastLoss" in diagnostics and diagnostics["lastLoss"] is not None:
+                self.qtableOutput.insert(tk.END, f"Last Loss: {float(diagnostics['lastLoss']):.6f}\n")
+            actionSpecs = list(snapshot.action_specs)
+            if actionSpecs:
+                self.qtableOutput.insert(tk.END, "\nPolicy Actions:\n")
+                for index, spec in enumerate(actionSpecs):
+                    self.qtableOutput.insert(tk.END, f"  {index}: {self.getActionLabel(index, actionSpecs)}\n")
 
     def displayStatistics(self, bot: Any, profileIndex: int) -> None:
         snapshot = self._visualizationService.build_snapshot(bot.profileName, bot)

@@ -8,8 +8,8 @@ from .actions import (
     NAME_TO_DIRECTION,
 )
 from .options import OptionSpec
-from .step_result import StepResult
-from .action_registry import ActionRegistry
+from .stepResult import StepResult
+from .actionRegistry import ActionRegistry
 
 __all__ = [
     "ActionSpec",

@@ -6,10 +6,10 @@ from typing import TYPE_CHECKING, Any, Callable, Optional
 from gameEnvironment import GameEnvironment
 from services.curriculum import CurriculumDecision
 from services.diagnostics import DiagnosticsService
-from services.training_session import TrainingSession
+from services.trainingSession import TrainingSession
 
 if TYPE_CHECKING:
-    from bots.dqnlearning.warmup_store import WarmupStore
+    from bots.dqnlearning.warmupStore import WarmupStore
 
 
 class TrainingController:
@@ -56,6 +56,7 @@ class TrainingController:
         poolSize: int = 20,
         randomMinGenerationLength: int | None = None,
         randomMaxGenerationLength: int | None = None,
+        randomIncludeEnemies: bool = False,
         nTransitions: int | None = None,
         nCompletions: int | None = None,
         onProgress: Optional[Callable[[int, int], None]] = None,
@@ -75,6 +76,7 @@ class TrainingController:
                 pool_size=int(poolSize),
                 random_min_generation_length=randomMinGenerationLength,
                 random_max_generation_length=randomMaxGenerationLength,
+                random_include_enemies=bool(randomIncludeEnemies),
                 is_collecting=True,
             )
             try:
@@ -87,7 +89,7 @@ class TrainingController:
 
             def _collectRun() -> None:
                 try:
-                    from bots.dqnlearning.warmup_store import WarmupCollector
+                    from bots.dqnlearning.warmupStore import WarmupCollector
                     profile = self._env.profileManager.loadProfile(profileName)
                     botIndex = int(self._env.applyProfile(profile, loadCheckpoint=False))
                     session.bind_bot_index(botIndex)
@@ -144,6 +146,7 @@ class TrainingController:
         poolSize: int = 20,
         randomMinGenerationLength: int | None = None,
         randomMaxGenerationLength: int | None = None,
+        randomIncludeEnemies: bool = False,
         warmupStore: Optional["WarmupStore"] = None,
         warmupTransitionCount: int | None = None,
         onProgress: Optional[Callable[[int, int], None]] = None,
@@ -168,6 +171,7 @@ class TrainingController:
                 pool_size=int(poolSize),
                 random_min_generation_length=randomMinGenerationLength,
                 random_max_generation_length=randomMaxGenerationLength,
+                random_include_enemies=bool(randomIncludeEnemies),
                 total_rounds=int(rounds),
                 is_training=True,
             )
@@ -200,23 +204,14 @@ class TrainingController:
                         raise RuntimeError("Bot index not set")
                     trainingBot: Any = self._env.bots[idx0]
                     if warmupStore is not None:
-                        try:
-                            n = warmupStore.inject(trainingBot, maxTransitions=warmupTransitionCount)
-                            if self._diagnostics is not None:
-                                self._diagnostics.info(
-                                    "training_controller",
-                                    "Injected warmup transitions",
-                                    profile_name=profileName,
-                                    transition_count=int(n),
-                                )
-                        except Exception as exc:
-                            if self._diagnostics is not None:
-                                self._diagnostics.exception(
-                                    "training_controller",
-                                    "Warmup injection skipped",
-                                    exc,
-                                    profile_name=profileName,
-                                )
+                        n = warmupStore.inject(trainingBot, maxTransitions=warmupTransitionCount)
+                        if self._diagnostics is not None:
+                            self._diagnostics.info(
+                                "training_controller",
+                                "Injected warmup transitions",
+                                profile_name=profileName,
+                                transition_count=int(n),
+                            )
 
                     for i in range(int(rounds)):
                         if session.stop_requested():
@@ -239,11 +234,15 @@ class TrainingController:
                         bot.runEpisode()
                         if session.curriculum_enabled:
                             self._handleSessionEpisodeComplete(session, bot)
-                        evalFreq = int(getattr(getattr(bot, "config", None), "evaluationFrequency", 0))
+                        shouldEvaluateFn = getattr(bot, "shouldRunEvaluationEpisode", None)
+                        if callable(shouldEvaluateFn):
+                            shouldEvaluate = bool(shouldEvaluateFn(i + 1))
+                        else:
+                            evalFreq = int(getattr(getattr(bot, "config", None), "evaluationFrequency", 0))
+                            shouldEvaluate = bool(evalFreq > 0 and (i + 1) % evalFreq == 0)
                         shouldEvaluate = (
-                            evalFreq > 0
-                            and (i + 1) % evalFreq == 0
-                            and not bool(getattr(bot, "isWarmingUp", False))
+                            shouldEvaluate
+                            and not getattr(bot, "isWarmingUp", False)
                             and hasattr(bot, "runEvaluationEpisode")
                         )
                         if shouldEvaluate:

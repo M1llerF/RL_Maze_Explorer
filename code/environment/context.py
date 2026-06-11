@@ -6,8 +6,8 @@ from bots.common.actions import DIRECTION_DELTAS, NAME_TO_DIRECTION
 from environment.traversal import TraversalPolicy, build_traversal_policy
 
 if TYPE_CHECKING:
-    from environment.entity_registry import EntityRegistry
-    from bots.common.action_registry import ActionRegistry
+    from environment.entityRegistry import EntityRegistry
+    from bots.common.actionRegistry import ActionRegistry
 
 POSITION_CHANGED = "position_changed"
 ACTION_APPLIED = "action_applied"
@@ -166,10 +166,7 @@ class EnvironmentContext:
             entity_to_state(e) for e in self._entities.allEntities()
             if not isinstance(e, (Wall, Goal))
         ]
-        try:
-            self._maze.entities = non_structural
-        except Exception:
-            pass
+        self._maze.entities = non_structural
 
     # ── Maze metadata ─────────────────────────────────────────────────────────
 

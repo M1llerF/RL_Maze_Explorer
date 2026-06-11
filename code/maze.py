@@ -1,4 +1,3 @@
-import numpy as np
 import random
 from typing import Any
 from environment.entities import entity_from_state, entity_to_state
@@ -68,6 +67,7 @@ class Maze:
         self,
         minGenerationLength: int | None = None,
         maxGenerationLength: int | None = None,
+        includeEnemies: bool = False,
     ) -> None:
         minLength = max(0, int(minGenerationLength)) if minGenerationLength is not None else None
         maxLength = max(0, int(maxGenerationLength)) if maxGenerationLength is not None else None
@@ -79,6 +79,8 @@ class Maze:
 
         for _ in range(100):
             self._generateSimpleMazeTopology()
+            if includeEnemies:
+                self._populateRandomEnemies()
             pathLength = len(Pathfinding.aStarSearch(self, self.start, self.end))
             if self._matchesGenerationLength(pathLength, minLength, maxLength):
                 return
@@ -127,6 +129,52 @@ class Maze:
         self.end = self.getFarthestValidEndPosition(startPositions)
         self.setStart(*self.start)
         self.setGoal(*self.end)
+
+    def _populateRandomEnemies(self) -> None:
+        if self.start is None or self.end is None:
+            self.entities = []
+            return
+        optimalPath = Pathfinding.aStarSearch(self, self.start, self.end)
+        optimalPathCells = set(optimalPath)
+        pathCandidates = [
+            pos
+            for pos in optimalPath[1:-1]
+            if self.grid[pos[0]][pos[1]] == 0
+        ]
+        offPathCandidates = [
+            (x, y)
+            for x in range(self.height)
+            for y in range(self.width)
+            if self.grid[x][y] == 0
+            and (x, y) != tuple(self.start)
+            and (x, y) != tuple(self.end)
+            and (x, y) not in optimalPathCells
+        ]
+        candidates = [*pathCandidates, *offPathCandidates]
+        if not candidates:
+            self.entities = []
+            return
+
+        enemyCount = min(len(candidates), max(2, min(8, len(candidates) // 25)))
+        pathEnemyCount = min(len(pathCandidates), max(1, int(round(enemyCount * 0.75))))
+        random.shuffle(pathCandidates)
+        random.shuffle(offPathCandidates)
+        selected = pathCandidates[:pathEnemyCount]
+        selected.extend(offPathCandidates[: max(0, enemyCount - len(selected))])
+        if len(selected) < enemyCount:
+            selected.extend(pathCandidates[pathEnemyCount:enemyCount])
+
+        self.setEntities(
+            [
+                {
+                    "type": "enemy",
+                    "position": [int(x), int(y)],
+                    "damage": 20.0,
+                    "behavior": {"kind": "chase"},
+                }
+                for x, y in selected[:enemyCount]
+            ]
+        )
 
     @staticmethod
     def _matchesGenerationLength(
@@ -206,16 +254,33 @@ class Maze:
 
     def getFarthestValidEndPosition(self, startPositions: list[tuple[int, int]]) -> tuple[int, int]:
         """
-        Get the farthest valid end position that is at least minimum_distance away from the start.
+        Get the reachable open cell farthest from the start by shortest-path distance.
         """
-        validEndPositions = [
-            pos for pos in startPositions if np.linalg.norm(np.array(pos) - np.array(self.start)) >= self.minimumDistance
-        ]
+        if self.start is None:
+            return random.choice(startPositions)
 
-        if validEndPositions:
-            return random.choice(validEndPositions)
-        else:
-            return max(startPositions, key=lambda pos: float(np.linalg.norm(np.array(pos) - np.array(self.start))))
+        distances: dict[tuple[int, int], int] = {tuple(self.start): 0}
+        queue: list[tuple[int, int]] = [tuple(self.start)]
+        head = 0
+        while head < len(queue):
+            x, y = queue[head]
+            head += 1
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                nxt = (x + dx, y + dy)
+                nx, ny = nxt
+                if not (0 <= nx < self.height and 0 <= ny < self.width):
+                    continue
+                if self.grid[nx][ny] != 0 or nxt in distances:
+                    continue
+                distances[nxt] = distances[(x, y)] + 1
+                queue.append(nxt)
+
+        reachable = [pos for pos in startPositions if pos in distances and pos != tuple(self.start)]
+        if not reachable:
+            return tuple(self.start)
+        maxDistance = max(distances[pos] for pos in reachable)
+        farthest = [pos for pos in reachable if distances[pos] == maxDistance]
+        return random.choice(farthest)
 
         
     # UI rendering is handled in UI modules (VisualizationWindow/DisplayTools).

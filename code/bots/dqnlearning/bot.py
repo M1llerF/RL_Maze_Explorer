@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import deque
 from typing import Any, cast
 
 import numpy as np
@@ -7,33 +8,34 @@ import numpy as np
 from baseBot import BaseBot
 from botTools import BotTools
 from bots.common.actions import ActionSpec, DEFAULT_PRIMITIVE_ACTIONS, DEFAULT_ATTACK_ACTIONS
-from bots.common.action_registry import ActionRegistry
+from bots.common.actionRegistry import ActionRegistry
 from bots.common.decision import ActionChoice, DecisionInput, LocalActionSpace
 from bots.common.options import OptionSpec
-from bots.common.options_library import defaultOptions
-from bots.common.step_result import StepResult
+from bots.common.optionsLibrary import defaultOptions
+from bots.common.stepResult import StepResult
 from environment.context import EnvironmentContext, POSITION_CHANGED
-from environment.enemy_system import EnemySystem
-from environment.entity_factory import build_entity_registry
-from environment.entity_registry import EntityRegistry
+from environment.enemySystem import EnemySystem
+from environment.entityFactory import build_entity_registry
+from environment.entityRegistry import EntityRegistry
 from environment.movement import GridMovement4Way, buildDefaultMovementExecutors, buildAttackExecutors
-from environment.observation_encoder import ObservationEncoder
+from environment.observationEncoder import ObservationEncoder
 from environment.sensing import build_sensing_service
 from environment.traversal import build_traversal_policy
-from bots.bot_status import BotStatus
+from bots.botStatus import BotStatus
 from botFactory import BotCreateContext
-from services.episode_recorder import PostEpisodeRecorder
+from services.episodeRecorder import PostEpisodeRecorder
 from services.runners import DQNEpisodeRunner
 
 from .agent import DqnAgent
 from .checkpoint import CheckpointIO, CheckpointMeta
-from .checkpoint_service import DQNCheckpointService
+from .checkpointService import DQNCheckpointService
 from .config import DQNConfig
 from .encoder import StateEncoder
-from .hrl_agent import HierarchicalDqnAgent
+from .hrlAgent import HierarchicalDqnAgent
 from .planner import WarmupPlanner
 from .types import EncodedState, Transition
-from .warmup_coordinator import WarmupCoordinator
+from .warmupCoordinator import WarmupCoordinator
+from services.episodeResult import EpisodePersistencePolicy, EvaluationEpisodeDefinition
 
 
 class DQNBot(BaseBot):
@@ -74,15 +76,19 @@ class DQNBot(BaseBot):
         self._movementModel = GridMovement4Way()
         self._actionRegistry = ActionRegistry()
         self._optionSpecs: list[OptionSpec] = []
+        self._optionSelectionCounts: dict[str, int] = {}
+        self._optionDurationTotals: dict[str, int] = {}
+        self._optionSuccessCounts: dict[str, int] = {}
         executors = buildDefaultMovementExecutors(self._movementModel)
         for spec in DEFAULT_PRIMITIVE_ACTIONS:
             self._actionRegistry.registerPrimitive(spec, executors[spec.id])
-        if bool(getattr(self.config, "useAttackActions", False)):
+        if getattr(self.config, "useAttackActions", False):
             attack_executors = buildAttackExecutors()
             for spec in DEFAULT_ATTACK_ACTIONS:
                 self._actionRegistry.registerPrimitive(spec, attack_executors[spec.id])
-        if bool(getattr(self.config, "useMacroActions", False)):
-            for option in defaultOptions():
+        if getattr(self.config, "useMacroActions", False):
+            optionSet = str(getattr(self.config, "macroOptionSet", "naive"))
+            for option in defaultOptions(optionSet):
                 self._optionSpecs.append(option)
                 self._actionRegistry.registerOption(option)
         self._context = EnvironmentContext(
@@ -101,6 +107,10 @@ class DQNBot(BaseBot):
         self._observePosition(cast(tuple[int, int], self.position))
         self.state = self.calculateState()
         schema = self.encoder.inferSchema(self.state)
+        self._sequenceFrameDim = int(schema.inputDim)
+        self._encodedFrameHistory: deque[np.ndarray] = deque(maxlen=self._sequenceLength())
+        self._rebuildEncodedFrameHistory()
+        policyInputDim = self._policyInputDim(self._sequenceFrameDim)
         self._policyMode = self._resolvePolicyMode()
         flatActionCount = self._flatActionSpace().numActions
         optionActionCount = self._optionActionSpace().numActions
@@ -114,7 +124,7 @@ class DQNBot(BaseBot):
         if self.usesHierarchicalPolicy:
             self.agent = HierarchicalDqnAgent(
                 self.config,
-                inputDim=schema.inputDim,
+                inputDim=policyInputDim,
                 optionCount=optionActionCount,
                 primitiveCount=self._primitiveActionSpace().numActions,
                 flatDim=schema.flatDim,
@@ -124,7 +134,7 @@ class DQNBot(BaseBot):
         else:
             self.agent = DqnAgent(
                 self.config,
-                inputDim=schema.inputDim,
+                inputDim=policyInputDim,
                 numActions=flatActionCount,
                 flatDim=schema.flatDim,
                 mapShape=schema.mapShape,
@@ -134,7 +144,7 @@ class DQNBot(BaseBot):
         if self.dualRecordsPrimitivePolicy:
             self.primitiveBootstrapAgent = DqnAgent(
                 self.config,
-                inputDim=schema.inputDim,
+                inputDim=policyInputDim,
                 numActions=self._primitiveActionSpace().numActions,
                 flatDim=schema.flatDim,
                 mapShape=schema.mapShape,
@@ -155,14 +165,14 @@ class DQNBot(BaseBot):
         self.checkpointMeta = CheckpointMeta(
             stateSchemaVersion=schema.stateSchemaVersion,
             encoderConfigFingerprint=schema.encoderConfigFingerprint,
-            inputDim=schema.inputDim,
+            inputDim=policyInputDim,
             actionDim=self._policyActionCount(),
             policyMode=self._policyMode,
         )
         self.primitiveCheckpointMeta = CheckpointMeta(
             stateSchemaVersion=schema.stateSchemaVersion,
             encoderConfigFingerprint=schema.encoderConfigFingerprint,
-            inputDim=schema.inputDim,
+            inputDim=policyInputDim,
             actionDim=self._primitiveActionSpace().numActions,
             policyMode="flat",
         )
@@ -194,6 +204,7 @@ class DQNBot(BaseBot):
         self._visDebugEnabled = False
         self._visDebugStep = 0
         self._visRecentPositions: list[tuple[int, int]] = []
+        self._recentPositions: list[tuple[int, int]] = [cast(tuple[int, int], self.position)]
         self._visWallHits: int = 0
         self._visEnemyKills: int = 0
         self._visStepCount: int = 0
@@ -222,10 +233,12 @@ class DQNBot(BaseBot):
         self._knownOpen.clear()
         self._knownWalls.clear()
         self._seenGoals.clear()
+        self._recentPositions = [start]
         self._pushCooldownRemaining = 0
         self.warmupCoordinator.reset()
         self._observePosition(cast(tuple[int, int], self.position))
         self.state = self.calculateState()
+        self._rebuildEncodedFrameHistory()
 
     def _syncMazeDependentState(self) -> None:
         mazeH = max(1, int(self.maze.height))
@@ -234,6 +247,7 @@ class DQNBot(BaseBot):
             self._knownMap = np.zeros((mazeH, mazeW, 3), dtype=np.float32)
         if self._visitedMap.shape != (mazeH, mazeW):
             self._visitedMap = np.zeros((mazeH, mazeW), dtype=np.float32)
+        self._observationEncoder = ObservationEncoder(scale=float(max(mazeH, mazeW, 1)))
         self.encoder = StateEncoder(self.config, mazeHeight=mazeH, mazeWidth=mazeW)
 
     # ------------------------------------------------------------------
@@ -264,9 +278,8 @@ class DQNBot(BaseBot):
             cast(EncodedState, nextEncoded), done, duration=duration,
         )
         cast(Any, self.agent).storeTransition(transition)
-        if not self.isWarmingUp:
-            self.agent.trainStep()
-            self.agent.onEnvironmentStep()
+        self.agent.trainStep()
+        self.agent.onEnvironmentStep()
 
     def applyHighLevelLearningUpdate(
         self,
@@ -284,42 +297,77 @@ class DQNBot(BaseBot):
             cast(EncodedState, nextEncoded), done, duration=duration,
         )
         cast(Any, self.agent).storeHighTransition(transition)
-        if not self.isWarmingUp:
-            self.agent.trainStep()
+        self.agent.trainStep()
 
     def persistTrainingArtifacts(self) -> None:
         self.saveCheckpoint()
 
+    def getTrainingEpisodePersistencePolicy(self) -> EpisodePersistencePolicy:
+        return EpisodePersistencePolicy(
+            save_maze_episode=True,
+            save_heatmap_stats=True,
+            append_reward=True,
+        )
+
+    def getEvaluationEpisodeDefinition(self) -> EvaluationEpisodeDefinition:
+        return EvaluationEpisodeDefinition(
+            description=(
+                "Greedy evaluation episode with learning disabled and epsilon forced to 0.0. "
+                "Evaluation snapshots latest/highest/lowest mazes and reward history."
+            ),
+            frequency=int(getattr(self.config, "evaluationFrequency", 0)),
+            is_dedicated_episode=True,
+            eval_epsilon=0.0,
+            persistence=EpisodePersistencePolicy(
+                save_maze_episode=True,
+                save_heatmap_stats=False,
+                append_reward=True,
+            ),
+        )
+
     # ── BaseBot public contract implementations ───────────────────────────────
 
     def getStatus(self) -> BotStatus:
-        try:
-            replaySize = int(len(cast(Any, self.agent).replay))
-        except Exception:
-            replaySize = 0
+        replaySize = len(cast(Any, self.agent).replay)
         warmupRequired = int(getattr(self.config, "replayWarmupSteps", 0))
         explorationRate = 0.0
         epsilonIsManual = False
-        try:
-            if hasattr(self.agent, "diagnostics"):
-                diag = cast(Any, self.agent).diagnostics()
-                explorationRate = float(diag.epsilon)
-                epsilonIsManual = getattr(cast(Any, self.agent), "manualEpsilonOverride", None) is not None
-        except Exception:
-            pass
-        collectingWarmup = bool(getattr(self, "_collectingWarmup", False))
+        if hasattr(self.agent, "diagnostics"):
+            diag = cast(Any, self.agent).diagnostics()
+            explorationRate = float(diag.epsilon)
+            epsilonIsManual = getattr(cast(Any, self.agent), "manualEpsilonOverride", None) is not None
         return BotStatus(
             episode_count=int(self.episodeCounter),
-            is_warming_up=collectingWarmup and replaySize < warmupRequired,
+            is_warming_up=self.isWarmingUp,
             replay_size=replaySize,
             warmup_required=warmupRequired,
             current_exploration_rate=explorationRate,
             epsilon_is_manual=epsilonIsManual,
             checkpoint_frequency=int(getattr(self.config, "checkpointFrequency", 0)),
             current_episode_steps=int(getattr(self, "currentEpisodeSteps", 0)),
-            last_episode_success=bool(getattr(self, "lastEpisodeSuccess", False)),
+            last_episode_success=getattr(self, "lastEpisodeSuccess", False),
             artifact_save_label="checkpoint",
         )
+
+    def optionDiagnostics(self) -> dict[str, object]:
+        names = sorted(set(self._optionSelectionCounts) | set(self._optionDurationTotals) | set(self._optionSuccessCounts))
+        per_option: dict[str, dict[str, float | int]] = {}
+        for name in names:
+            count = int(self._optionSelectionCounts.get(name, 0))
+            duration = int(self._optionDurationTotals.get(name, 0))
+            successes = int(self._optionSuccessCounts.get(name, 0))
+            per_option[name] = {
+                "selection_count": count,
+                "total_duration": duration,
+                "mean_duration": round(duration / count, 4) if count else 0.0,
+                "success_count": successes,
+            }
+        return {
+            "macro_option_set": str(getattr(self.config, "macroOptionSet", "naive")),
+            "registered_options": [option.name for option in self._optionSpecs],
+            "total_option_selections": sum(int(v) for v in self._optionSelectionCounts.values()),
+            "per_option": per_option,
+        }
 
     def setManualEpsilon(self, value: float | None) -> bool:
         if not hasattr(self.agent, "setManualEpsilon"):
@@ -353,15 +401,15 @@ class DQNBot(BaseBot):
 
     @property
     def usesHierarchicalPolicy(self) -> bool:
-        return bool(getattr(self.config, "useHierarchicalPolicy", False))
+        return getattr(self.config, "useHierarchicalPolicy", False)
 
     @property
     def usesMacroOnlyPolicy(self) -> bool:
-        return bool(getattr(self.config, "useMacroOnlyPolicy", False))
+        return getattr(self.config, "useMacroOnlyPolicy", False)
 
     @property
     def dualRecordsPrimitivePolicy(self) -> bool:
-        return bool(getattr(self.config, "dualRecordPrimitivePolicy", False))
+        return getattr(self.config, "dualRecordPrimitivePolicy", False)
 
     def applyStep(self, action_id: int, training: bool = False) -> StepResult:
         """Apply a local action chosen from the active policy action space."""
@@ -370,7 +418,6 @@ class DQNBot(BaseBot):
 
         actionSpace = self._defaultPolicyActionSpace()
         if action_id < 0 or action_id >= actionSpace.numActions:
-            self.state = self.calculateState()
             return StepResult(reward=0.0, done=False, info={"hit_wall": True}, duration=1)
         semanticAction = self._actionRegistry.semanticIdForLocal(actionSpace, action_id)
         self.lastAction = int(semanticAction)
@@ -378,7 +425,6 @@ class DQNBot(BaseBot):
             result = self._applyFlatOption(semanticAction, training=training)
         else:
             result = self._applyPrimitiveStep(semanticAction)
-        self.state = self.calculateState()
         return result
 
     # ── Shared action contract (BaseBot interface) ────────────────────────────
@@ -445,7 +491,53 @@ class DQNBot(BaseBot):
             int(getattr(self.config, "neuralMapWidth", 31)),
         ))
 
+    def _sequenceLength(self) -> int:
+        return max(1, int(getattr(self.config, "lstmSequenceLength", 1)))
+
+    def _policyInputDim(self, baseDim: int) -> int:
+        return int(baseDim) * self._sequenceLength() if getattr(self.config, "useLstmPolicy", False) else int(baseDim)
+
+    def _encodeBaseState(self, observation: tuple[Any, ...]) -> EncodedState:
+        return self.encoder.encode(observation)
+
+    def _rebuildEncodedFrameHistory(self) -> None:
+        self._encodedFrameHistory.clear()
+        if not getattr(self.config, "useLstmPolicy", False):
+            return
+        self._encodedFrameHistory.append(self._encodeBaseState(self.state).values.copy())
+
+    def _appendCurrentEncodedFrame(self) -> None:
+        if not getattr(self.config, "useLstmPolicy", False):
+            return
+        self._encodedFrameHistory.append(self._encodeBaseState(self.state).values.copy())
+
+    def _stackSequenceValues(self, currentValues: np.ndarray) -> np.ndarray:
+        if not getattr(self.config, "useLstmPolicy", False):
+            return np.asarray(currentValues, dtype=np.float32)
+        zeroFrame = np.zeros(int(self._sequenceFrameDim), dtype=np.float32)
+        frames = [np.asarray(frame, dtype=np.float32) for frame in self._encodedFrameHistory]
+        if not frames:
+            frames = [np.asarray(currentValues, dtype=np.float32)]
+        elif not np.array_equal(frames[-1], currentValues):
+            frames = frames[:-1] + [np.asarray(currentValues, dtype=np.float32)]
+        frames = frames[-self._sequenceLength():]
+        if len(frames) < self._sequenceLength():
+            frames = [zeroFrame.copy() for _ in range(self._sequenceLength() - len(frames))] + frames
+        return np.concatenate(frames, axis=0).astype(np.float32, copy=False)
+
     def calculateState(self, actionSpace: LocalActionSpace | None = None) -> tuple[Any, ...]:
+        currentActionSpace = actionSpace or self._defaultPolicyActionSpace()
+        if getattr(self.config, "useSharedComparisonState", False):
+            compactState = self._observationEncoder.encodeCompactState(
+                self._context,
+                self._sensing,
+                position=cast(tuple[int, int], self.position),
+                include_entity_features=getattr(self.config, "useEntityObservation", False),
+                include_enemy_features=getattr(self.config, "useEnemyObservation", False),
+            )
+            validActions = tuple(1 if v else 0 for v in currentActionSpace.validActionMask)
+            return compactState + (validActions,)
+
         position = cast(tuple[int, int], self.position)
         wallDistances, _ = self._sensing.wall_distances_and_goal_directions(position)
         previousDelta = (
@@ -453,24 +545,16 @@ class DQNBot(BaseBot):
             if self.previousPosition is None
             else (self.previousPosition[0] - position[0], self.previousPosition[1] - position[1])
         )
-        currentActionSpace = actionSpace or self._defaultPolicyActionSpace()
         validActions = tuple(1 if v else 0 for v in currentActionSpace.validActionMask)
         # Local observation: first-person line-of-sight rays per direction.
         localObservation = self._calculateLocalObservation(position)
         neuralMap: tuple[float, ...] | np.ndarray = ()
         if self.config.useRichEncoding:
             neuralMap = self.encoder.encodeNeuralMap(position, self._knownMap, self._visitedMap)
-        # Goal direction: relative position when seen, zero-vector while unknown.
-        goal = cast(tuple[int, int], self.maze.end)
-        goalSeen = 1.0 if goal in self._seenGoals else 0.0
-        observationScale = self._observationScale()
-        goalDr = float(np.clip(float(goal[0] - position[0]) / observationScale, -1.0, 1.0)) if goalSeen else 0.0
-        goalDc = float(np.clip(float(goal[1] - position[1]) / observationScale, -1.0, 1.0)) if goalSeen else 0.0
-        goalInfo: tuple[float, float, float] = (goalDr, goalDc, goalSeen)
         entityFeatures: tuple[float, ...] = ()
-        if bool(getattr(self.config, "useEntityObservation", False)):
+        if getattr(self.config, "useEntityObservation", False):
             entityFeatures = tuple(float(v) for v in self._observationEncoder.encode(self._context).tolist())
-        if bool(getattr(self.config, "useEnemyObservation", False)):
+        if getattr(self.config, "useEnemyObservation", False):
             enemy_scan = self._observationEncoder.encodeEnemyScan(self._context, self._sensing)
             entityFeatures = entityFeatures + enemy_scan
         return (
@@ -481,7 +565,6 @@ class DQNBot(BaseBot):
             localObservation,
             neuralMap,
             validActions,
-            goalInfo,
             entityFeatures,
         )
 
@@ -492,7 +575,13 @@ class DQNBot(BaseBot):
         actionSpace: LocalActionSpace | None = None,
     ) -> EncodedState:
         observation = self.calculateState(actionSpace=actionSpace) if state is None else state
-        return self.encoder.encode(observation)
+        baseEncoded = self._encodeBaseState(observation)
+        if not getattr(self.config, "useLstmPolicy", False):
+            return baseEncoded
+        return EncodedState(
+            values=self._stackSequenceValues(baseEncoded.values),
+            validActionMask=baseEncoded.validActionMask,
+        )
 
     def chooseAction(
         self,
@@ -532,6 +621,27 @@ class DQNBot(BaseBot):
             if forceEpsilon is not None:
                 self.agent.setManualEpsilon(None)
 
+    def selectWarmupAction(self, decision: Any, plannerLocal: int | None) -> ActionChoice:
+        return self.agent.selectWarmupAction(decision, plannerLocal)
+
+    def plannerDirectionToOptionLocalId(self, decision: DecisionInput, primitiveDirection: int) -> int | None:
+        """Map a planner primitive direction to the local ID of the matching option.
+
+        Iterates valid options in the decision's action space and returns the
+        local ID of the first option whose initial primitive step matches the
+        requested direction. Returns None if no valid option covers that direction.
+        """
+        for localId in range(decision.actionSpace.numActions):
+            if not decision.actionSpace.validActionMask[localId]:
+                continue
+            semanticId = decision.actionSpace.semanticId(localId)
+            option = self._actionRegistry.getOption(semanticId)
+            if option is None:
+                continue
+            if option.choosePrimitiveAction(self._context) == primitiveDirection:
+                return localId
+        return None
+
     def makeTransition(
         self,
         encodedState: EncodedState,
@@ -562,6 +672,7 @@ class DQNBot(BaseBot):
             raise KeyError(f"Unknown option action_id={semanticOptionId}")
 
         cumulativeReward = 0.0
+        discountedReward = 0.0
         duration = 0
         revisitCount = 0
         reversalCount = 0
@@ -573,7 +684,8 @@ class DQNBot(BaseBot):
             primitiveSemantic = lowDecision.actionSpace.semanticId(primitiveChoice.local_id)
             primitiveResult = self._applyPrimitiveStep(primitiveSemantic)
             optionReward = float(primitiveResult.reward) + float(option.intrinsicReward(self._context, primitiveResult))
-            cumulativeReward += (float(self.config.discountFactor) ** duration) * optionReward
+            cumulativeReward += optionReward
+            discountedReward += (float(self.config.discountFactor) ** duration) * optionReward
             duration += int(primitiveResult.duration)
             revisitCount += 1 if bool(primitiveResult.info.get("was_revisit", False)) else 0
             reversalCount += 1 if bool(primitiveResult.info.get("was_reversal", False)) else 0
@@ -594,9 +706,8 @@ class DQNBot(BaseBot):
                     bootstrapDiscount=float(self.config.discountFactor),
                 )
                 self.agent.storeLowTransition(lowTransition)
-                if not self.isWarmingUp:
-                    self.agent.trainStep()
-                    self.agent.onEnvironmentStep()
+                self.agent.trainStep()
+                self.agent.onEnvironmentStep()
             if done:
                 break
 
@@ -612,6 +723,7 @@ class DQNBot(BaseBot):
                 "action_key": option.name,
             },
             duration=max(1, duration),
+            trainingReward=discountedReward,
         )
 
     # ------------------------------------------------------------------
@@ -882,6 +994,15 @@ class DQNBot(BaseBot):
                 self._knownMap[position[0], position[1], 1] = 1.0
         self.warmupCoordinator.onWallDiscovered()
 
+    def _recordPositionAndDetectOscillation(self, position: tuple[int, int]) -> bool:
+        self._recentPositions.append(position)
+        if len(self._recentPositions) > 4:
+            self._recentPositions.pop(0)
+        if len(self._recentPositions) < 4:
+            return False
+        p0, p1, p2, p3 = self._recentPositions
+        return p0 == p2 and p1 == p3 and p0 != p1
+
     def _applyPrimitiveStep(self, action: int) -> StepResult:
         self.lastAction = int(action)
         currentPos = cast(tuple[int, int], self.position)
@@ -913,12 +1034,23 @@ class DQNBot(BaseBot):
             self._rememberWall(attempted)
             wasRevisit = False
             wasReversal = False
+            oscillationDetected = False
         else:
             reward += self.shapingPenalty(wasRevisit, wasReversal)
+            oscillationDetected = self._recordPositionAndDetectOscillation(cast(tuple[int, int], self.position))
+            if oscillationDetected:
+                reward += float(getattr(self.config, "oscillationPenalty", 0.0))
+        self.state = self.calculateState()
+        self._appendCurrentEncodedFrame()
         return StepResult(
             reward=reward,
             done=bool(result.done),
-            info={"hit_wall": hitWall, "was_revisit": wasRevisit, "was_reversal": wasReversal},
+            info={
+                "hit_wall": hitWall,
+                "was_revisit": wasRevisit,
+                "was_reversal": wasReversal,
+                "oscillation_detected": oscillationDetected,
+            },
             duration=int(result.duration),
         )
 
@@ -926,7 +1058,10 @@ class DQNBot(BaseBot):
         option = self._actionRegistry.getOption(semanticActionId)
         if option is None:
             raise KeyError(f"Unknown option action_id={semanticActionId}")
+        optionName = str(option.name)
+        self._optionSelectionCounts[optionName] = self._optionSelectionCounts.get(optionName, 0) + 1
         cumulativeReward = 0.0
+        discountedReward = 0.0
         duration = 0
         revisitCount = 0
         reversalCount = 0
@@ -937,9 +1072,8 @@ class DQNBot(BaseBot):
             primitiveBefore = self.encodeState(actionSpace=self._primitiveActionSpace()) if self.primitiveBootstrapAgent is not None else None
             primitiveResult = self._applyPrimitiveStep(primitiveId)
             stepReward = float(primitiveResult.reward) + float(option.intrinsicReward(self._context, primitiveResult))
-            cumulativeReward += (
-                float(self.config.discountFactor) ** duration
-            ) * stepReward
+            cumulativeReward += stepReward
+            discountedReward += (float(self.config.discountFactor) ** duration) * stepReward
             duration += int(primitiveResult.duration)
             revisitCount += 1 if bool(primitiveResult.info.get("was_revisit", False)) else 0
             reversalCount += 1 if bool(primitiveResult.info.get("was_reversal", False)) else 0
@@ -956,6 +1090,9 @@ class DQNBot(BaseBot):
                 )
             if done:
                 break
+        self._optionDurationTotals[optionName] = self._optionDurationTotals.get(optionName, 0) + max(1, duration)
+        if self.position == self.maze.end:
+            self._optionSuccessCounts[optionName] = self._optionSuccessCounts.get(optionName, 0) + 1
         return StepResult(
             reward=cumulativeReward,
             done=done,
@@ -967,6 +1104,7 @@ class DQNBot(BaseBot):
                 "action_key": option.name,
             },
             duration=max(1, duration),
+            trainingReward=discountedReward,
         )
 
     def _syncEntitiesFromMaze(self) -> None:
@@ -1012,7 +1150,7 @@ class DQNBot(BaseBot):
         return self._actionRegistry.buildLocalActionSpace(
             self._context,
             includePrimitives=not self.usesMacroOnlyPolicy,
-            includeOptions=bool(getattr(self.config, "useMacroActions", False)),
+            includeOptions=getattr(self.config, "useMacroActions", False),
         )
 
     def _defaultPolicyActionSpace(self) -> LocalActionSpace:
@@ -1055,6 +1193,5 @@ class DQNBot(BaseBot):
             bootstrapDiscount=float(self.config.discountFactor) ** max(1, int(primitiveResult.duration)),
         )
         self.primitiveBootstrapAgent.storeTransition(transition)
-        if not self.isWarmingUp:
-            self.primitiveBootstrapAgent.trainStep()
-            self.primitiveBootstrapAgent.onEnvironmentStep()
+        self.primitiveBootstrapAgent.trainStep()
+        self.primitiveBootstrapAgent.onEnvironmentStep()

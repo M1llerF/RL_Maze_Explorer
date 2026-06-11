@@ -123,7 +123,7 @@ class ArtifactsRepository:
         try:
             with open(path, 'rb') as f:
                 return f.read()
-        except Exception:
+        except OSError:
             return None
 
     def _fileChecksum(self, filePath: str) -> str:
@@ -158,14 +158,13 @@ class ArtifactsRepository:
                     saved = f.read()
                 now = self._fileChecksum(path)
                 if saved != now:
-                    # Corrupt or partial file; ignore
                     return {}
-            except Exception:
+            except OSError:
                 return {}
         try:
             with open(path, 'rb') as f:
                 return pickle.load(f)
-        except Exception:
+        except (pickle.UnpicklingError, EOFError, OSError):
             return {}
 
     # ---------- Rewards log ----------
@@ -186,7 +185,7 @@ class ArtifactsRepository:
                 if isinstance(data, dict):
                     return cast(ProfileDict, data)
                 return {}
-        except Exception:
+        except (pickle.UnpicklingError, EOFError, OSError):
             return {}
 
     def _migrateCountersFromLegacyProfile(self, profile: str) -> ProfileDict:
@@ -204,7 +203,7 @@ class ArtifactsRepository:
             if counters:
                 self._writeProfileDict(profile, counters)
             return counters
-        except Exception:
+        except (pickle.UnpicklingError, EOFError, OSError):
             return {}
 
     def _writeProfileDict(self, profile: str, data: ProfileDict) -> None:
@@ -266,7 +265,7 @@ class ArtifactsRepository:
                     data = cast(ProfileDict, loaded)
                 else:
                     data = {}
-        except Exception:
+        except (json.JSONDecodeError, ValueError, OSError):
             return {
                 "latest": {},
                 "highest": {"reward": float('-inf')},
@@ -291,7 +290,7 @@ class ArtifactsRepository:
                         seq = cast(list[Any] | tuple[Any, ...], obj)
                         if len(seq) == 2:
                             tup = (int(seq[0]), int(seq[1]))
-                except Exception:
+                except (ValueError, SyntaxError):
                     pass
                 if tup is None:
                     try:
@@ -300,7 +299,7 @@ class ArtifactsRepository:
                             s = s[1:-1]
                         a, b = s.split(',', 1)
                         tup = (int(a.strip()), int(b.strip()))
-                    except Exception:
+                    except (ValueError, AttributeError):
                         continue
                 converted[tup] = int(v)
             containerDict['heatmap_data'] = converted
@@ -413,9 +412,9 @@ class ArtifactsRepository:
 
     def updateStepsFromHeatmap(self, profile: str, heatmapData: HeatmapData) -> None:
         """Update total_steps, times_revisited_squares, non_repeating_steps_taken from heatmap."""
-        total = int(sum(int(v) for v in (heatmapData or {}).values()))
-        unique = int(len(heatmapData or {}))
-        repeated = int(max(0, total - unique))
+        total = sum(int(v) for v in (heatmapData or {}).values())
+        unique = len(heatmapData or {})
+        repeated = max(0, total - unique)
         self.updateProfileCounters(
             profile,
             totalSteps=total,

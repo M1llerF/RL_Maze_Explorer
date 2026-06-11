@@ -109,3 +109,50 @@ class DqnModel(nn.Module):
             combined = flat
 
         return self.mlp(combined)
+
+
+class RecurrentDqnModel(nn.Module):
+    """
+    Recurrent Q-network over a fixed-length stack of encoded observations.
+
+    Input layout:
+        [ step_0 | step_1 | ... | step_(T-1) ]
+
+    where each step is a flat encoded observation of length stepDim. The model
+    reshapes to (B, T, stepDim), projects each step independently, runs an
+    LSTM over time, then predicts Q-values from the final output state.
+    """
+
+    def __init__(
+        self,
+        *,
+        stepDim: int,
+        sequenceLength: int,
+        hiddenSize: int,
+        lstmHiddenSize: int,
+        numActions: int,
+    ) -> None:
+        super().__init__()
+        self.stepDim = int(stepDim)
+        self.sequenceLength = int(sequenceLength)
+        self.stepProj = nn.Sequential(
+            nn.Linear(self.stepDim, int(hiddenSize)),
+            nn.ReLU(),
+        )
+        self.lstm = nn.LSTM(
+            input_size=int(hiddenSize),
+            hidden_size=int(lstmHiddenSize),
+            num_layers=1,
+            batch_first=True,
+        )
+        self.head = nn.Sequential(
+            nn.Linear(int(lstmHiddenSize), int(hiddenSize)),
+            nn.ReLU(),
+            nn.Linear(int(hiddenSize), int(numActions)),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        sequence = x.view(-1, self.sequenceLength, self.stepDim)
+        projected = self.stepProj(sequence)
+        outputs, _ = self.lstm(projected)
+        return self.head(outputs[:, -1, :])

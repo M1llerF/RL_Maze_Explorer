@@ -20,13 +20,6 @@ class WallTool(BaseTool):
         frame.gridData[y][x] = 1
 
 
-class PathTool(BaseTool):
-    name = "Path"
-
-    def apply(self, frame: Any, y: int, x: int) -> None:
-        frame.gridData[y][x] = 0
-
-
 class EraseTool(BaseTool):
     name = "Erase"
 
@@ -76,7 +69,7 @@ class EnemyTool(BaseTool):
 
 
 def _buildRegistry() -> Dict[str, BaseTool]:
-    tools = [WallTool(), PathTool(), EraseTool(), StartTool(), EndTool(), EnemyTool()]
+    tools = [WallTool(), EraseTool(), StartTool(), EndTool(), EnemyTool()]
     return {t.name: t for t in tools}
 
 

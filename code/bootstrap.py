@@ -8,8 +8,8 @@ from gameEnvironment import GameEnvironment
 from services.diagnostics import DiagnosticsService
 from services.training import TrainingController
 from ui.app import MazeAIApp
-from ui.app_state import AppState
-from ui.event_bus import EventBus
+from ui.appState import AppState
+from ui.eventBus import EventBus
 
 
 @dataclass(frozen=True)

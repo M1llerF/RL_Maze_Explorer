@@ -1,24 +1,68 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any, Protocol, cast, runtime_checkable
 from rewardSystem import clipRewardValue
 from rewardSystem import RewardEvent
 from environment.context import ENEMY_KILLED
-from environment.enemy_system import EnemySystem
-from services.episode_result import EpisodeResult
+from environment.enemySystem import EnemySystem
+from services.episodePolicy import compute_no_progress_patience, compute_step_limit
+from services.episodeResult import EpisodePersistencePolicy, EpisodeResult, EvaluationEpisodeDefinition
 from bots.common.actions import NUM_PRIMITIVE_DIRECTIONS
+
+
+@runtime_checkable
+class EpisodeRunnerProtocol(Protocol):
+    """Common interface for all episode runners used by the research system."""
+
+    def runEpisode(self, *, mode: str = "training") -> EpisodeResult: ...
+    def runEvaluationEpisode(self) -> EpisodeResult: ...
+
+
+def _resolve_episode_persistence_policy(
+    bot: Any,
+    mode: str,
+    *,
+    fallback: EpisodePersistencePolicy,
+) -> EpisodePersistencePolicy:
+    getter = getattr(bot, "getEpisodePersistencePolicy", None)
+    if not callable(getter):
+        return fallback
+    policy = getter(mode)
+    if isinstance(policy, EpisodePersistencePolicy):
+        return policy
+    return fallback
+
+
+def _resolve_evaluation_epsilon(bot: Any, fallback: float | None = None) -> float | None:
+    getter = getattr(bot, "getEvaluationEpisodeDefinition", None)
+    if not callable(getter):
+        return fallback
+    definition = getter()
+    if isinstance(definition, EvaluationEpisodeDefinition):
+        return definition.eval_epsilon
+    return fallback
 
 
 @dataclass
 class EpisodeRuntime:
+    """
+    Mutable counters accumulated during a single episode. Passed by reference to runner
+    helpers so they can update state without needing return values on every call.
+    """
+
     optimalPath: list[tuple[int, int]]
     optimalLength: int
     stepLimit: int
+    progressPatience: int
     steps: int = 0
     timesHitWall: int = 0
+    noProgressSteps: int = 0
     outcome: str = "aborted"
     bestDistance: int = 0
+    decisions: int = 0
+    optionSelections: int = 0
+    optionSteps: int = 0
 
 
 class QLearningEpisodeRunner:
@@ -44,7 +88,7 @@ class QLearningEpisodeRunner:
         if context is not None:
             context.on(ENEMY_KILLED, lambda **_: self._onEnemyKilled())
 
-    def runEpisode(self) -> EpisodeResult:
+    def runEpisode(self, *, mode: str = "training") -> EpisodeResult:
         bot = self.bot
         bot.onEpisodeStart("training")
         runtime = self._startEpisode(mode="training")
@@ -85,13 +129,13 @@ class QLearningEpisodeRunner:
         tools = bot.tools
         maze = bot.maze
 
-        if mode == "visualization":
+        if hasattr(bot, "reset"):
             bot.reset()
 
         optimalPath = tools.getOptimalPathInfo(maze.start, maze.end, output="path")
         optimalLength = len(optimalPath)
-        areaBonus = int(0.5 * maze.width * maze.height)
-        stepLimit = min(5000, max(200, 12 * optimalLength + areaBonus)) if optimalLength > 0 else max(200, areaBonus)
+        stepLimit = compute_step_limit(bot.config, maze, optimalLength)
+        progressPatience = compute_no_progress_patience(bot.config, optimalLength, stepLimit)
 
         bot.totalReward = 0.0
         bot.currentEpisodeSteps = 0
@@ -107,13 +151,14 @@ class QLearningEpisodeRunner:
             bot._visStepLimit = stepLimit
             bot._visBestDistance = self._manhattan(bot.position, maze.end)
             bot._visNoProgressSteps = 0
-            bot._visProgressPatience = min(200, 50 * optimalLength)
+            bot._visProgressPatience = int(progressPatience)
             bot._visSteps = 0
             bot._visTimesHitWall = 0
         return EpisodeRuntime(
             optimalPath=optimalPath,
             optimalLength=optimalLength,
             stepLimit=stepLimit,
+            progressPatience=progressPatience,
             bestDistance=self._manhattan(bot.position, maze.end),
         )
 
@@ -140,7 +185,7 @@ class QLearningEpisodeRunner:
             for item in tuple(getattr(enemyTick, "semantic_events", ()) or ())
             if isinstance(item, dict)
         ]
-        if bool(getattr(enemyTick, "agent_caught", False)):
+        if getattr(enemyTick, "agent_caught", False):
             events.append(RewardEvent(name="death_by_enemy", payload={}))
         return tuple(events)
 
@@ -155,33 +200,55 @@ class QLearningEpisodeRunner:
 
         decision = bot.buildDecisionInput()
         choice = bot.selectAction(decision)
+        runtime.decisions += 1
         start_state = bot.state
         semanticAction = decision.actionSpace.semanticId(choice.local_id)
         is_option = bot.isOptionAction(semanticAction)
 
         if is_option:
             result = bot.applyStep(choice.local_id)
+            runtime.optionSelections += 1
+            runtime.optionSteps += int(result.duration)
             enemyTick = self._tickEnemies()
             rewardEvents = self._rewardEventsFromEnemyTick(enemyTick) + self._collectKillEvents()
             reward = float(result.reward)
+            learningReward = float(result.trainingReward) if result.trainingReward is not None else reward
             if hasattr(rsys, "evaluateSemanticEvents"):
-                reward += float(rsys.evaluateSemanticEvents(rewardEvents))
-            reward = clipRewardValue(float(reward), bot.config)
-            bot.totalReward += reward
-            if apply_learning:
-                bot.applyLearningUpdate(start_state, choice.local_id, reward, int(result.duration))
+                eventReward = float(rsys.evaluateSemanticEvents(rewardEvents))
+                reward += eventReward
+                learningReward += eventReward
             runtime.steps += result.duration
             bot.currentEpisodeSteps = int(runtime.steps)
             if mode == "visualization":
                 bot._visSteps = int(runtime.steps)
-            if bool(getattr(enemyTick, "agent_caught", False)):
+            hitWall = bool(result.info.get("hit_wall", False))
+            wasRevisit = bool(result.info.get("was_revisit", False))
+            if hitWall:
+                runtime.timesHitWall += 1
+            else:
+                runtime.noProgressSteps = runtime.noProgressSteps + 1 if wasRevisit else 0
+            if bot.position != maze.end and runtime.steps >= runtime.stepLimit:
+                penalty = float(getattr(bot.config, "stepLimitPenalty", 0.0))
+                reward += penalty
+                learningReward += penalty
+                runtime.outcome = "step_limit"
+            if runtime.outcome == "aborted" and runtime.noProgressSteps >= runtime.progressPatience:
+                penalty = float(getattr(bot.config, "noProgressPenalty", 0.0))
+                reward += penalty
+                learningReward += penalty
+                runtime.outcome = "no_progress"
+            reward = clipRewardValue(float(reward), bot.config)
+            learningReward = clipRewardValue(float(learningReward), bot.config)
+            bot.totalReward += reward
+            if apply_learning:
+                bot.applyLearningUpdate(start_state, choice.local_id, learningReward, int(result.duration))
+            if runtime.outcome != "aborted":
+                return False
+            if getattr(enemyTick, "agent_caught", False):
                 runtime.outcome = "death_by_enemy"
                 return False
             if result.done or bot.position == maze.end:
                 runtime.outcome = "goal_reached" if bot.position == maze.end else runtime.outcome
-                return False
-            if runtime.steps > runtime.stepLimit:
-                runtime.outcome = "step_limit_loop"
                 return False
             return True
 
@@ -189,28 +256,38 @@ class QLearningEpisodeRunner:
         # Execute them directly without the movement-validity path.
         if semanticAction >= NUM_PRIMITIVE_DIRECTIONS:
             result = bot.executePrimitiveAction(semanticAction)
+            if hasattr(bot, "calculateState"):
+                bot.state = bot.calculateState()
             enemyTick = self._tickEnemies()
             rewardEvents = self._rewardEventsFromEnemyTick(enemyTick) + self._collectKillEvents()
             reward = float(result.reward)
             if hasattr(rsys, "evaluateSemanticEvents"):
                 reward += float(rsys.evaluateSemanticEvents(rewardEvents))
-            reward = clipRewardValue(reward, bot.config)
-            bot.totalReward += reward
-            if apply_learning:
-                bot.applyLearningUpdate(start_state, choice.local_id, reward, 1)
-            if bool(getattr(enemyTick, "agent_caught", False)):
+            if getattr(enemyTick, "agent_caught", False):
+                reward = clipRewardValue(reward, bot.config)
+                bot.totalReward += reward
+                if apply_learning:
+                    bot.applyLearningUpdate(start_state, choice.local_id, reward, 1)
                 runtime.outcome = "death_by_enemy"
                 return False
             runtime.steps += 1
             bot.currentEpisodeSteps = int(runtime.steps)
             if mode == "visualization":
                 bot._visSteps = int(runtime.steps)
-            if runtime.steps > runtime.stepLimit:
-                runtime.outcome = "step_limit_loop"
+            if runtime.steps >= runtime.stepLimit:
+                reward += float(getattr(bot.config, "stepLimitPenalty", 0.0))
+                runtime.outcome = "step_limit"
+            reward = clipRewardValue(reward, bot.config)
+            bot.totalReward += reward
+            if apply_learning:
+                bot.applyLearningUpdate(start_state, choice.local_id, reward, 1)
+            if runtime.outcome != "aborted":
                 return False
             return True
 
         attempted = bot.tools.calculateNextPosition(bot.position, semanticAction)
+        wasReversal = getattr(bot, "previousPosition", None) is not None and attempted == bot.previousPosition
+        wasRevisit = attempted in stats.getVisitedPositions()
         context = getattr(bot, "_context", None)
         is_valid_attempt = (
             bool(context.isValidPosition(attempted))
@@ -233,18 +310,28 @@ class QLearningEpisodeRunner:
         )
 
         if not is_valid_attempt:
+            runtime.timesHitWall += 1
+            runtime.steps += 1
+            if mode == "visualization":
+                bot._visTimesHitWall = int(runtime.timesHitWall)
+                bot._visSteps = int(runtime.steps)
+            bot.currentEpisodeSteps = int(runtime.steps)
+            if runtime.steps >= runtime.stepLimit:
+                reward += float(getattr(bot.config, "stepLimitPenalty", 0.0))
+                runtime.outcome = "step_limit"
             reward = clipRewardValue(float(reward), bot.config)
             if apply_learning:
                 bot.applyLearningUpdate(start_state, choice.local_id, reward, 1)
             bot.totalReward += reward
-            runtime.timesHitWall += 1
-            if mode == "visualization":
-                bot._visTimesHitWall = int(runtime.timesHitWall)
-            bot.currentEpisodeSteps = int(runtime.steps)
+            if runtime.outcome != "aborted":
+                return False
             return True
 
         result = bot.executePrimitiveAction(semanticAction)
-        if result.info.get("death_by_enemy"):
+        if hasattr(bot, "calculateState"):
+            bot.state = bot.calculateState()
+        resultInfo = dict(getattr(result, "info", {}) or {})
+        if resultInfo.get("death_by_enemy"):
             reward = clipRewardValue(float(reward + float(result.reward)), bot.config)
             bot.totalReward += reward
             if apply_learning:
@@ -252,6 +339,9 @@ class QLearningEpisodeRunner:
             runtime.outcome = "death_by_enemy"
             return False
         reward += result.reward
+        shapingPenalty = getattr(bot, "shapingPenalty", None)
+        if callable(shapingPenalty):
+            reward += float(shapingPenalty(wasRevisit, wasReversal))
         enemyTick = self._tickEnemies()
         rewardEvents = self._rewardEventsFromEnemyTick(enemyTick) + self._collectKillEvents()
         if hasattr(rsys, "evaluateSemanticEvents"):
@@ -259,34 +349,28 @@ class QLearningEpisodeRunner:
 
         stats.totalSteps = stats.timesRevisitedSquares + stats.nonRepeatingStepsTaken
 
-        if stats.totalSteps > runtime.stepLimit:
-            reward += -100.0
-            reward = clipRewardValue(float(reward), bot.config)
-            if apply_learning:
-                bot.applyLearningUpdate(start_state, choice.local_id, reward, 1)
-            bot.totalReward += reward
-            runtime.outcome = "step_limit_statistics"
-            return False
-
-        reward = clipRewardValue(float(reward), bot.config)
-        bot.totalReward += reward
-        if apply_learning:
-            bot.applyLearningUpdate(start_state, choice.local_id, reward, 1)
-
-        if bool(getattr(enemyTick, "agent_caught", False)):
-            runtime.outcome = "death_by_enemy"
-            return False
-
         runtime.steps += 1
         bot.currentEpisodeSteps = int(runtime.steps)
         if mode == "visualization":
             bot._visSteps = int(runtime.steps)
+        runtime.noProgressSteps = runtime.noProgressSteps + 1 if wasRevisit else 0
 
         currentDistance = self._manhattan(bot.position, maze.end)
         if currentDistance < runtime.bestDistance:
             runtime.bestDistance = currentDistance
-        if runtime.steps > runtime.stepLimit:
-            runtime.outcome = "step_limit_loop"
+        if getattr(enemyTick, "agent_caught", False):
+            runtime.outcome = "death_by_enemy"
+        elif bot.position != maze.end and runtime.steps >= runtime.stepLimit:
+            reward += float(getattr(bot.config, "stepLimitPenalty", 0.0))
+            runtime.outcome = "step_limit"
+        elif runtime.noProgressSteps >= runtime.progressPatience:
+            reward += float(getattr(bot.config, "noProgressPenalty", 0.0))
+            runtime.outcome = "no_progress"
+        reward = clipRewardValue(float(reward), bot.config)
+        bot.totalReward += reward
+        if apply_learning:
+            bot.applyLearningUpdate(start_state, choice.local_id, reward, 1)
+        if runtime.outcome != "aborted":
             return False
         return True
 
@@ -304,6 +388,33 @@ class QLearningEpisodeRunner:
         self._visualizationRuntime = None
         return True
 
+    def runEvaluationEpisode(self) -> EpisodeResult:
+        """Greedy evaluation episode: no Q-table updates, epsilon forced to 0.0."""
+        bot = self.bot
+        qLearner = getattr(bot, "qLearning", None)
+        saved_min_eps = saved_init_eps = saved_steps = None
+        if qLearner is not None:
+            saved_min_eps = qLearner.minExplorationRate
+            saved_init_eps = qLearner.initialExplorationRate
+            saved_steps = qLearner.totalSteps
+            qLearner.minExplorationRate = 0.0
+            qLearner.initialExplorationRate = 0.0
+        bot.onEpisodeStart("evaluation")
+        runtime = self._startEpisode(mode="evaluation")
+        try:
+            while bot.position != bot.maze.end:
+                if not self._runStep(runtime, mode="evaluation", apply_learning=False):
+                    break
+            if bot.position == bot.maze.end:
+                runtime.outcome = "goal_reached"
+            return self._finalizeEvaluationEpisode(runtime)
+        finally:
+            bot.onEpisodeEnd("evaluation", runtime.outcome)
+            if qLearner is not None and saved_min_eps is not None:
+                qLearner.minExplorationRate = saved_min_eps
+                qLearner.initialExplorationRate = saved_init_eps
+                qLearner.totalSteps = saved_steps
+
     def _finalizeEpisode(self, runtime: EpisodeRuntime) -> EpisodeResult:
         bot = self.bot
         bot.lastEpisodeSuccess = runtime.outcome == "goal_reached"
@@ -316,6 +427,15 @@ class QLearningEpisodeRunner:
         bot._currentOptimalPath = []
         bot._currentOptimalLength = 0
         heatmapData = dict(bot.statistics.getVisitedPositions())
+        persistence = _resolve_episode_persistence_policy(
+            bot,
+            "training",
+            fallback=EpisodePersistencePolicy(
+                save_maze_episode=True,
+                save_heatmap_stats=True,
+                append_reward=True,
+            ),
+        )
         return EpisodeResult(
             profile_name=str(bot.profileName),
             mode="training",
@@ -327,9 +447,53 @@ class QLearningEpisodeRunner:
             times_hit_wall=int(runtime.timesHitWall),
             heatmap_data=heatmapData,
             maze=bot.maze,
-            save_maze_episode=True,
-            save_heatmap_stats=True,
-            append_reward=True,
+            decisions=int(runtime.decisions),
+            option_selections=int(runtime.optionSelections),
+            option_steps=int(runtime.optionSteps),
+            save_maze_episode=bool(persistence.save_maze_episode),
+            save_heatmap_stats=bool(persistence.save_heatmap_stats),
+            append_reward=bool(persistence.append_reward),
+        )
+
+    def _finalizeEvaluationEpisode(self, runtime: EpisodeRuntime) -> EpisodeResult:
+        bot = self.bot
+        bot.lastEpisodeSuccess = runtime.outcome == "goal_reached"
+        bot.lastEpisodeSteps = int(runtime.steps)
+        bot.lastEpisodeOptimalSteps = int(runtime.optimalLength)
+        bot.lastEpisodeOutcome = str(runtime.outcome)
+        bot.lastEpisodeWallHits = int(runtime.timesHitWall)
+        bot.lastEpisodeEnemyKills = self._episodeKills
+        bot._currentOptimalPath = []
+        bot._currentOptimalLength = 0
+        heatmapData = dict(bot.statistics.getVisitedPositions())
+        persistence = _resolve_episode_persistence_policy(
+            bot,
+            "evaluation",
+            fallback=EpisodePersistencePolicy(
+                save_maze_episode=False,
+                save_heatmap_stats=False,
+                append_reward=False,
+            ),
+        )
+        evalEpsilon = _resolve_evaluation_epsilon(bot, fallback=0.0)
+        return EpisodeResult(
+            profile_name=str(bot.profileName),
+            mode="evaluation",
+            outcome=runtime.outcome,
+            success=runtime.outcome == "goal_reached",
+            total_reward=float(bot.totalReward),
+            steps=int(runtime.steps),
+            optimal_steps=int(runtime.optimalLength),
+            times_hit_wall=int(runtime.timesHitWall),
+            heatmap_data=heatmapData,
+            maze=bot.maze,
+            decisions=int(runtime.decisions),
+            option_selections=int(runtime.optionSelections),
+            option_steps=int(runtime.optionSteps),
+            save_maze_episode=bool(persistence.save_maze_episode),
+            save_heatmap_stats=bool(persistence.save_heatmap_stats),
+            append_reward=bool(persistence.append_reward),
+            eval_epsilon=evalEpsilon,
         )
 
     @staticmethod
@@ -347,6 +511,9 @@ class DQNEpisodeRuntime:
     timesHitWall: int = 0
     noProgressSteps: int = 0
     outcome: str = "aborted"
+    decisions: int = 0
+    optionSelections: int = 0
+    optionSteps: int = 0
 
 
 class DQNEpisodeRunner:
@@ -359,7 +526,7 @@ class DQNEpisodeRunner:
         if context is not None:
             context.on(ENEMY_KILLED, lambda **_: self._onEnemyKilled())
 
-    def runEpisode(self, mode: str = "training") -> EpisodeResult:
+    def runEpisode(self, *, mode: str = "training") -> EpisodeResult:
         bot = self.bot
         if mode not in {"training", "evaluation"}:
             raise ValueError(f"Unsupported episode mode: {mode}")
@@ -378,24 +545,17 @@ class DQNEpisodeRunner:
         finally:
             bot.onEpisodeEnd(mode, runtime.outcome)
 
+    def runEvaluationEpisode(self) -> EpisodeResult:
+        return self.runEpisode(mode="evaluation")
+
     def _startEpisode(self) -> DQNEpisodeRuntime:
         bot = self.bot
         optimalPathRaw = bot.tools.getOptimalPathInfo(bot.maze.start, bot.maze.end, output="path")
         optimalPath: list[tuple[int, int]] = cast(list[tuple[int, int]], optimalPathRaw) if isinstance(optimalPathRaw, list) else []
         optimalLength = len(optimalPath)
         cfg = bot.config
-        areaBonus = int(float(cfg.stepLimitAreaCoeff) * bot.maze.width * bot.maze.height)
-        dynamicLimit = (
-            min(int(cfg.stepLimitMax), max(int(cfg.stepLimitMin), int(cfg.stepLimitStepCoeff) * optimalLength + areaBonus))
-            if optimalLength > 0
-            else max(int(cfg.stepLimitMin), areaBonus)
-        )
-        stepLimit = min(dynamicLimit, int(cfg.maxStepsPerEpisode))
-        dynamicPatience = int(max(1, optimalLength) * float(cfg.noProgressPatienceFactor))
-        progressPatience = min(
-            stepLimit,
-            max(int(cfg.minNoProgressSteps), min(int(cfg.maxNoProgressSteps), dynamicPatience)),
-        )
+        stepLimit = compute_step_limit(cfg, bot.maze, optimalLength)
+        progressPatience = compute_no_progress_patience(cfg, optimalLength, stepLimit)
         bot.reset()
         bot.currentEpisodeSteps = 0
         self._pendingKills = 0
@@ -432,12 +592,12 @@ class DQNEpisodeRunner:
             for item in tuple(getattr(enemyTick, "semantic_events", ()) or ())
             if isinstance(item, dict)
         ]
-        if bool(getattr(enemyTick, "agent_caught", False)):
+        if getattr(enemyTick, "agent_caught", False):
             events.append(RewardEvent(name="death_by_enemy", payload={}))
         return tuple(events)
 
     def _runStep(self, runtime: DQNEpisodeRuntime, *, mode: str) -> bool:
-        if bool(getattr(self.bot, "usesHierarchicalPolicy", False)):
+        if getattr(self.bot, "usesHierarchicalPolicy", False):
             return self._runHierarchicalStep(runtime, mode=mode)
         bot = self.bot
         stats = bot.statistics
@@ -450,21 +610,28 @@ class DQNEpisodeRunner:
             if mode == "training"
             else bot.chooseAction(
                 training=False,
-                forceEpsilon=float(bot.config.epsilonEnd),
+                forceEpsilon=0.0,
                 allowWarmupPlanner=False,
             )
         )
+        runtime.decisions += 1
 
         result = bot.applyStep(choice.local_id, training=(mode == "training"))
         reward = float(result.reward)
+        learningReward = float(result.trainingReward) if result.trainingReward is not None else reward
         if result.info.get("death_by_enemy"):
             runtime.outcome = "death_by_enemy"
         enemyTick = self._tickEnemies()
         rewardEvents = self._rewardEventsFromEnemyTick(enemyTick) + self._collectKillEvents()
         if hasattr(bot.rewardSystem, "evaluateSemanticEvents"):
-            reward += float(bot.rewardSystem.evaluateSemanticEvents(rewardEvents))
+            eventReward = float(bot.rewardSystem.evaluateSemanticEvents(rewardEvents))
+            reward += eventReward
+            learningReward += eventReward
         hitWall = bool(result.info.get("hit_wall", False))
         wasRevisit = bool(result.info.get("was_revisit", False))
+        if result.info.get("option"):
+            runtime.optionSelections += 1
+            runtime.optionSteps += int(result.duration)
         done = bool(result.done or bot.position == bot.maze.end)
         if hitWall:
             runtime.timesHitWall += 1
@@ -480,20 +647,25 @@ class DQNEpisodeRunner:
         bot.currentEpisodeSteps = int(runtime.steps)
 
         if not done and runtime.steps >= runtime.stepLimit:
-            reward += float(bot.config.stepLimitPenalty)
+            penalty = float(bot.config.stepLimitPenalty)
+            reward += penalty
+            learningReward += penalty
             runtime.outcome = "step_limit"
             done = True
-        if not done and bool(getattr(enemyTick, "agent_caught", False)):
+        if not done and getattr(enemyTick, "agent_caught", False):
             runtime.outcome = "death_by_enemy"
             done = True
         if not done and runtime.noProgressSteps >= runtime.progressPatience:
-            reward += float(bot.config.noProgressPenalty)
+            penalty = float(bot.config.noProgressPenalty)
+            reward += penalty
+            learningReward += penalty
             runtime.outcome = "no_progress"
             done = True
         reward = clipRewardValue(float(reward), bot.config)
+        learningReward = clipRewardValue(float(learningReward), bot.config)
 
         if mode == "training":
-            bot.applyLearningUpdate(encodedState, choice.local_id, reward, done, int(result.duration))
+            bot.applyLearningUpdate(encodedState, choice.local_id, learningReward, done, int(result.duration))
         bot.addReward(reward)
         return not done
 
@@ -509,20 +681,27 @@ class DQNEpisodeRunner:
             if mode == "training"
             else bot.chooseAction(
                 training=False,
-                forceEpsilon=float(bot.config.epsilonEnd),
+                forceEpsilon=0.0,
                 allowWarmupPlanner=False,
             )
         )
+        runtime.decisions += 1
         result = bot.executeHierarchicalOption(choice.local_id, training=(mode == "training"))
         reward = float(result.reward)
+        learningReward = float(result.trainingReward) if result.trainingReward is not None else reward
         if result.info.get("death_by_enemy"):
             runtime.outcome = "death_by_enemy"
         enemyTick = self._tickEnemies()
         rewardEvents = self._rewardEventsFromEnemyTick(enemyTick) + self._collectKillEvents()
         if hasattr(bot.rewardSystem, "evaluateSemanticEvents"):
-            reward += float(bot.rewardSystem.evaluateSemanticEvents(rewardEvents))
+            eventReward = float(bot.rewardSystem.evaluateSemanticEvents(rewardEvents))
+            reward += eventReward
+            learningReward += eventReward
         hitWall = bool(result.info.get("hit_wall", False))
         wasRevisit = bool(result.info.get("was_revisit", False))
+        if result.info.get("option"):
+            runtime.optionSelections += 1
+            runtime.optionSteps += int(result.duration)
         done = bool(result.done or bot.position == bot.maze.end)
 
         if hitWall:
@@ -536,20 +715,25 @@ class DQNEpisodeRunner:
         bot.currentEpisodeSteps = int(runtime.steps)
 
         if not done and runtime.steps >= runtime.stepLimit:
-            reward += float(bot.config.stepLimitPenalty)
+            penalty = float(bot.config.stepLimitPenalty)
+            reward += penalty
+            learningReward += penalty
             runtime.outcome = "step_limit"
             done = True
-        if not done and bool(getattr(enemyTick, "agent_caught", False)):
+        if not done and getattr(enemyTick, "agent_caught", False):
             runtime.outcome = "death_by_enemy"
             done = True
         if not done and runtime.noProgressSteps >= runtime.progressPatience:
-            reward += float(bot.config.noProgressPenalty)
+            penalty = float(bot.config.noProgressPenalty)
+            reward += penalty
+            learningReward += penalty
             runtime.outcome = "no_progress"
             done = True
         reward = clipRewardValue(float(reward), bot.config)
+        learningReward = clipRewardValue(float(learningReward), bot.config)
 
         if mode == "training":
-            bot.applyHighLevelLearningUpdate(encodedState, choice.local_id, reward, done, int(result.duration))
+            bot.applyHighLevelLearningUpdate(encodedState, choice.local_id, learningReward, done, int(result.duration))
         bot.addReward(reward)
         return not done
 
@@ -557,6 +741,7 @@ class DQNEpisodeRunner:
         bot = self.bot
         success = runtime.outcome == "goal_reached"
         is_warming_up = mode == "training" and bool(bot.isWarmingUp)
+        evalEpsilon = _resolve_evaluation_epsilon(bot, fallback=0.0 if mode == "evaluation" else None)
 
         if mode == "training":
             bot.lastEpisodeSuccess = success
@@ -585,18 +770,32 @@ class DQNEpisodeRunner:
                 profile_name=str(bot.profileName),
                 mode=mode,
                 outcome=runtime.outcome,
-                success=False,
+                success=success,
                 total_reward=float(bot.totalReward),
                 steps=int(runtime.steps),
                 optimal_steps=int(runtime.optimalLength),
-                times_hit_wall=0,
-                heatmap_data={},
+                times_hit_wall=int(runtime.timesHitWall),
+                heatmap_data=heatmapData,
                 maze=bot.maze,
+                decisions=int(runtime.decisions),
+                option_selections=int(runtime.optionSelections),
+                option_steps=int(runtime.optionSteps),
                 save_maze_episode=False,
                 save_heatmap_stats=False,
                 append_reward=False,
                 is_warming_up=True,
+                eval_epsilon=evalEpsilon,
             )
+
+        persistence = _resolve_episode_persistence_policy(
+            bot,
+            mode,
+            fallback=EpisodePersistencePolicy(
+                save_maze_episode=(mode == "evaluation"),
+                save_heatmap_stats=(mode == "training"),
+                append_reward=(mode == "evaluation"),
+            ),
+        )
 
         return EpisodeResult(
             profile_name=str(bot.profileName),
@@ -609,8 +808,12 @@ class DQNEpisodeRunner:
             times_hit_wall=int(runtime.timesHitWall),
             heatmap_data=heatmapData,
             maze=bot.maze,
-            save_maze_episode=(mode == "evaluation"),
-            save_heatmap_stats=(mode == "training"),
-            append_reward=(mode == "evaluation"),
+            decisions=int(runtime.decisions),
+            option_selections=int(runtime.optionSelections),
+            option_steps=int(runtime.optionSteps),
+            save_maze_episode=bool(persistence.save_maze_episode),
+            save_heatmap_stats=bool(persistence.save_heatmap_stats),
+            append_reward=bool(persistence.append_reward),
             is_warming_up=False,
+            eval_epsilon=evalEpsilon,
         )

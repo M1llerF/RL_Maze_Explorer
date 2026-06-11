@@ -3,9 +3,9 @@ from .entities import (
     Entity, BlocksMovement, DamagesAgent, CanBeAttacked, ProvidesObservation,
     Wall, Goal, SpikeTrap, Enemy, LockedDoor, entity_from_state, entity_to_state,
 )
-from .entity_factory import build_entity_registry
-from .entity_registry import EntityRegistry
-from .enemy_system import (
+from .entityFactory import build_entity_registry
+from .entityRegistry import EntityRegistry
+from .enemySystem import (
     EnemyAction,
     EnemyBehavior,
     EnemyOccupancyDecision,
@@ -14,7 +14,7 @@ from .enemy_system import (
     EnemyTickResult,
 )
 from .movement import MovementModel, GridMovement4Way, MoveActionExecutor, buildDefaultMovementExecutors
-from .observation_encoder import ObservationEncoder
+from .observationEncoder import ObservationEncoder
 from .traversal import TraversalPolicy, MazeTraversalPolicy, build_traversal_policy
 from .sensing import MazeSensingService, build_sensing_service
 

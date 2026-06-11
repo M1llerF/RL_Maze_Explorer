@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from typing import Any, TYPE_CHECKING
 
+from services.episodeResult import EpisodePersistencePolicy, EvaluationEpisodeDefinition
+
 if TYPE_CHECKING:
-    from bots.bot_status import BotStatus
+    from bots.botStatus import BotStatus
     from bots.common.decision import LocalActionSpace
 
 
@@ -53,9 +55,9 @@ class BaseBot:
             self._pushCooldownRemaining -= 1
 
     def autoAttackAdjacentEnemyLocalId(self, actionSpace: "LocalActionSpace") -> int | None:
-        if not bool(getattr(self.config, "autoAttackAdjacentEnemy", False)):
+        if not getattr(self.config, "autoAttackAdjacentEnemy", False):
             return None
-        if not bool(getattr(self.config, "useAttackActions", False)):
+        if not getattr(self.config, "useAttackActions", False):
             return None
         context = getattr(self, "_context", None)
         if context is None:
@@ -69,14 +71,14 @@ class BaseBot:
             localId = actionSpace.localId(semanticId)
             if localId is None:
                 continue
-            if not bool(actionSpace.validActionMask[localId]):
+            if not actionSpace.validActionMask[localId]:
                 continue
             dr, dc = DIRECTION_DELTAS[int(semanticId)]
             target = (int(self.position[0]) + dr, int(self.position[1]) + dc)
             occupants = getattr(context, "entitiesAt", lambda _target: [])(target)
             for entity in occupants:
-                if isinstance(entity, Enemy) and bool(getattr(entity, "_alive", True)):
-                    return int(localId)
+                if isinstance(entity, Enemy) and getattr(entity, "_alive", True):
+                    return localId
         return None
 
     def reset(self) -> None:
@@ -180,6 +182,43 @@ class BaseBot:
         Subclasses override to save whatever the algorithm requires.
         """
         pass
+
+    def getTrainingEpisodePersistencePolicy(self) -> EpisodePersistencePolicy:
+        """Return the persistence policy for ordinary training episodes."""
+        return EpisodePersistencePolicy(
+            save_maze_episode=True,
+            save_heatmap_stats=True,
+            append_reward=True,
+        )
+
+    def getEvaluationEpisodeDefinition(self) -> EvaluationEpisodeDefinition:
+        """Return the bot-owned definition of its evaluation episode."""
+        return EvaluationEpisodeDefinition(
+            description="This bot does not define a dedicated evaluation episode.",
+            frequency=0,
+            is_dedicated_episode=False,
+            eval_epsilon=None,
+            persistence=EpisodePersistencePolicy(),
+        )
+
+    def getEpisodePersistencePolicy(self, mode: str) -> EpisodePersistencePolicy:
+        """Resolve persistence policy for a completed episode mode."""
+        if mode == "training":
+            return self.getTrainingEpisodePersistencePolicy()
+        if mode == "evaluation":
+            return self.getEvaluationEpisodeDefinition().persistence
+        return EpisodePersistencePolicy()
+
+    def shouldRunEvaluationEpisode(self, completedTrainingEpisodes: int) -> bool:
+        """Return True when a dedicated evaluation episode should run."""
+        definition = self.getEvaluationEpisodeDefinition()
+        frequency = max(0, int(definition.frequency))
+        return bool(
+            definition.is_dedicated_episode
+            and frequency > 0
+            and completedTrainingEpisodes > 0
+            and completedTrainingEpisodes % frequency == 0
+        )
 
     def requestStop(self) -> None:
         self._stopRequested = True

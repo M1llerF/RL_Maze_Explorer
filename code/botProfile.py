@@ -14,6 +14,22 @@ from botStatistics import BotStatistics
 
 
 class BotProfile:
+    @staticmethod
+    def _serializeConfigData(config: Any) -> Any:
+        configData = config.__dict__ if hasattr(config, '__dict__') else config
+        if not isinstance(configData, dict):
+            return configData
+
+        serialized = dict(configData)
+        macroOptionSet = serialized.get("macroOptionSet")
+        if macroOptionSet == "naive":
+            serialized["macroOptionSet"] = 1
+        elif macroOptionSet == "momentum":
+            serialized["macroOptionSet"] = 2
+        elif macroOptionSet == "astar":
+            serialized["macroOptionSet"] = 3
+        return serialized
+
     def __init__(
         self,
         name: str,
@@ -46,7 +62,7 @@ class BotProfile:
 
         :return: A dictionary representation of the profile.
         """
-        configData = self.config.__dict__ if hasattr(self.config, '__dict__') else self.config
+        configData = self._serializeConfigData(self.config)
         rewardConfigData = self.rewardConfig.__dict__ if hasattr(self.rewardConfig, '__dict__') else self.rewardConfig
         statisticsData = self.statistics.__dict__ if hasattr(self.statistics, '__dict__') else self.statistics
         return {
@@ -103,6 +119,8 @@ class BotProfile:
         cfgRaw = d.get('config')
         if botType is None:
             botType = 'QLearningBot'
+        if isinstance(cfgRaw, dict):
+            cfgRaw = BotProfile._legacySnakeToCamel(cast(dict[str, Any], cfgRaw))
 
         # Build config using bot-type mapping; defaults to QLearning for legacy payloads.
         config = buildConfigForBotType(botType, cfgRaw)

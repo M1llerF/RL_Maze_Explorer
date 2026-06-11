@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable
-import ast
+from typing import Any
 from environment.sensing import MazeSensingService
 from environment.traversal import TraversalPolicy, build_traversal_policy
 
@@ -126,57 +125,6 @@ class RewardSystem:
             sensors=self.sensors,
         )
     
-    def evaluateExpression(self, expression: Any, **kwargs: Any) -> float:
-        """
-        Safely evaluate a numeric expression.
-        Accepts numbers or simple arithmetic strings. Disallows names/calls.
-        """
-        # Fast-path numerics
-        if isinstance(expression, (int, float)):
-            return float(expression)
-        s = str(expression).strip()
-        # Simple direct parse
-        try:
-            return float(s)
-        except Exception:
-            pass
-        # Safe AST evaluation for +,-,*,/ and parentheses
-        try:
-            node = ast.parse(s, mode='eval')
-            return float(self._evalAst(node.body))
-        except Exception:
-            # Fallback to zero on invalid input
-            return 0.0
-
-    def _evalAst(self, node: Any) -> float:
-        binOps: dict[type[Any], Callable[[float, float], float]] = {
-            ast.Add: lambda a, b: a + b,
-            ast.Sub: lambda a, b: a - b,
-            ast.Mult: lambda a, b: a * b,
-            ast.Div: lambda a, b: a / b,
-            ast.FloorDiv: lambda a, b: a // b,
-            ast.Mod: lambda a, b: a % b,
-        }
-        unaryOps: dict[type[Any], Callable[[float], float]] = {
-            ast.USub: lambda a: -a,
-            ast.UAdd: lambda a: +a,
-        }
-        if isinstance(node, ast.Constant):  # py>=3.8
-            if isinstance(node.value, (int, float)):
-                return float(node.value)
-            raise ValueError("Non-numeric constant")
-        if isinstance(node, ast.UnaryOp):
-            fn = unaryOps.get(type(node.op))
-            if fn is None:
-                raise ValueError("Unsupported unary operator")
-            return fn(self._evalAst(node.operand))
-        if isinstance(node, ast.BinOp):
-            fn2 = binOps.get(type(node.op))
-            if fn2 is None:
-                raise ValueError("Unsupported binary operator")
-            return fn2(self._evalAst(node.left), self._evalAst(node.right))
-        raise ValueError("Unsupported expression")
-
     def buildStepContext(
         self,
         prevPosition: tuple[int, int],
@@ -187,51 +135,43 @@ class RewardSystem:
         *,
         semanticEvents: tuple[RewardEvent, ...] = (),
     ) -> RewardStepContext:
+        currentGoal = tuple(self.maze.end)
         return RewardStepContext(
             previous_position=prevPosition,
             new_position=newPosition,
             optimal_path=optimalPath,
             optimal_length=optimalLength,
             visited_positions=visitedPositions,
-            goal_position=self.environment.goal_position,
+            goal_position=currentGoal,
             hit_wall=not self.environment.traversal.is_valid_position(newPosition),
             goal_visible=bool(self.environment.sensors.goalInSight(newPosition)),
             semantic_events=tuple(semanticEvents),
         )
 
     def evaluateStep(self, step: RewardStepContext) -> float:
-        reward = 0
-
-        context = {
-            'optimal_length': step.optimal_length,
-            'visited_positions': step.visited_positions,
-            'optimal_path': step.optimal_path,
-            'new_position': step.new_position,
-        }
-
+        reward = 0.0
 
         for key, expr in self.rewardConfig.rewardModifiers.items():
-            # Use configured values directly (no scaling by path length)
-            valueExpr = str(expr)
+            value = float(expr)
 
             if key == 'goal_reached' and step.new_position == step.goal_position:
-                reward += self.evaluateExpression(valueExpr, **context)
+                reward += value
             elif key == 'hit_wall' and step.hit_wall:
-                reward += self.evaluateExpression(valueExpr, **context)
+                reward += value
             elif key == 'revisit_optimal_path' and step.new_position in step.visited_positions and step.new_position in step.optimal_path:
-                reward += self.evaluateExpression(valueExpr, **context)
+                reward += value
             elif key == 'revisit_non_optimal_path' and step.new_position in step.visited_positions and step.new_position not in step.optimal_path:
-                reward += self.evaluateExpression(valueExpr, **context)
+                reward += value
             elif key == 'new_tile_visited' and not step.hit_wall and step.new_position not in step.visited_positions:
-                reward += self.evaluateExpression(valueExpr, **context)
+                reward += value
             elif key == 'move_in_optimal_path' and step.new_position in step.optimal_path:
-                reward += self.evaluateExpression(valueExpr, **context)
+                reward += value
             elif key == 'see_goal_new_location' and step.goal_visible and step.new_position not in step.visited_positions:
-                reward += self.evaluateExpression(valueExpr, **context)
+                reward += value
             elif key == 'see_goal_revisit' and step.goal_visible and step.new_position in step.visited_positions:
-                reward += self.evaluateExpression(valueExpr, **context)
+                reward += value
             elif key == 'per_move_penalty':
-                reward += self.evaluateExpression(valueExpr, **context)
+                reward += value
         
         # Potential-based shaping: reward progress toward goal (distance reduction)
         if self.rewardConfig.usePotentialShaping:
@@ -248,13 +188,11 @@ class RewardSystem:
 
     def evaluateSemanticEvents(self, events: tuple["RewardEvent", ...]) -> float:
         reward = 0.0
-        semanticEventCounts = self._semanticEventCounts(events)
-        context = {'semantic_event_counts': semanticEventCounts}
-        for key, count in semanticEventCounts.items():
+        for key, count in self._semanticEventCounts(events).items():
             expr = self.rewardConfig.rewardModifiers.get(key)
             if expr is None:
                 continue
-            reward += count * self.evaluateExpression(str(expr), **context)
+            reward += count * float(expr)
         return reward
 
     @staticmethod
@@ -289,14 +227,14 @@ class RewardSystem:
 
     def updateRewards(self, reward: int) -> None:
         """
-        Update cumulative rewards and other statistics.
-        
-        :param reward: The reward to update.
+        Update cumulative reward and step counters. Event type is inferred by comparing
+        the reward value against configured penalty values. Only accurate when a single
+        reward component triggered on this step.
         """
         self.cumulativeReward += reward
-        if reward == self.evaluateExpression(self.rewardConfig.getModifier('hit_wall')):
+        if reward == float(self.rewardConfig.getModifier('hit_wall')):
             self.timesHitWall += 1
-        elif reward == self.evaluateExpression(self.rewardConfig.getModifier('revisit_non_optimal_path')):
+        elif reward == float(self.rewardConfig.getModifier('revisit_non_optimal_path')):
             self.timesRevisitedSquare += 1
         else:
             self.nonRepeatingStepsTaken += 1

@@ -7,7 +7,7 @@ from bots.common.actions import DIRECTION_DELTAS
 from environment.traversal import TraversalPolicy, build_traversal_policy
 
 if TYPE_CHECKING:
-    from environment.entity_registry import EntityRegistry
+    from environment.entityRegistry import EntityRegistry
 
 
 @dataclass

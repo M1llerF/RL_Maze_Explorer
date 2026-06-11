@@ -30,8 +30,8 @@ def buildConfigForBotType(botType: str | None, rawConfig: Any) -> Any:
     if callable(fromProfile):
         try:
             return fromProfile(cfgDict)
-        except Exception as e:
-            print(f"[ConfigLoad] from_profile_dict failed for '{configCls.__name__}', falling back to generic load: {e}")
+        except ValueError:
+            raise
 
     try:
         signature = inspect.signature(configCls)

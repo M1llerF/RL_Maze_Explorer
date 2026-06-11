@@ -1,11 +1,11 @@
 import json
 import os
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from tkinter import ttk, filedialog
 from typing import Any, Callable, Optional, cast
 
 from bots.dqnlearning.config import DQNConfig
-from ui.event_bus import PROFILE_SAVED, PROFILE_DELETED
+from ui.eventBus import FIXED_MAZE_SELECTED, PROFILE_SAVED, PROFILE_DELETED
 from ui.scrollable import VerticalScrolledFrame
 
 
@@ -29,6 +29,9 @@ class BotTrainingFrame(tk.Frame):
         self._collectPollAfterId: str | None = None
         self._warmupCompatible = False
         self._lastSavedEpisode: int | None = None
+        self._lastEvaluationRound: int | None = None
+        self._pendingWarmupClearProfile: str | None = None
+        self._pendingTrainingResetProfile: str | None = None
 
         scrollHost = VerticalScrolledFrame(self)
         scrollHost.pack(fill=tk.BOTH, expand=True)
@@ -44,7 +47,8 @@ class BotTrainingFrame(tk.Frame):
         self.roundsEntry = ttk.Entry(content)
         self.roundsEntry.pack()
 
-        ttk.Label(content, text="Maze Source:").pack(pady=(10, 0))
+        self.mazeModeLabel = ttk.Label(content, text="Maze Source: Random")
+        self.mazeModeLabel.pack(pady=(10, 0))
         self.mazeMode = ttk.Combobox(content, values=["Random", "Fixed (Builder)", "Pool"], state="readonly")
         self.mazeMode.set("Random")
         self.mazeMode.pack()
@@ -65,6 +69,14 @@ class BotTrainingFrame(tk.Frame):
             width=8,
         )
         self.randomMaxGenerationLengthEntry.pack(side=tk.LEFT, padx=(6, 0))
+        self.randomEnemyFrame = ttk.Frame(content)
+        self.randomIncludeEnemiesVar = tk.BooleanVar(value=False)
+        self.randomIncludeEnemiesCheck = ttk.Checkbutton(
+            self.randomEnemyFrame,
+            text="Generate enemies",
+            variable=self.randomIncludeEnemiesVar,
+        )
+        self.randomIncludeEnemiesCheck.pack(side=tk.LEFT)
         self.poolConfigFrame = ttk.Frame(content)
         ttk.Label(self.poolConfigFrame, text="Pool Size:").pack(side=tk.LEFT)
         self.poolSizeVar = tk.StringVar(value="20")
@@ -87,7 +99,7 @@ class BotTrainingFrame(tk.Frame):
             self._updateRandomLengthControls()
 
         self.mazeMode.bind("<<ComboboxSelected>>", onMazeModeChange)
-        self.profileSelect.bind("<<ComboboxSelected>>", lambda _e: self._updateWarmupStatus())
+        self.profileSelect.bind("<<ComboboxSelected>>", self._onProfileSelected)
 
         self.mazeButtons = ttk.Frame(content)
         self.mazeButtons.pack(pady=6)
@@ -181,6 +193,16 @@ class BotTrainingFrame(tk.Frame):
         self.epsilonLabel.pack()
         self.saveStatusLabel = ttk.Label(content, text="Save Status: n/a")
         self.saveStatusLabel.pack()
+        self.statusVar = tk.StringVar(value="Ready.")
+        self.statusLabel = tk.Label(
+            content,
+            textvariable=self.statusVar,
+            fg="#374151",
+            justify=tk.LEFT,
+            anchor="w",
+            wraplength=920,
+        )
+        self.statusLabel.pack(fill=tk.X, padx=20, pady=(4, 0))
         epsilonControls = ttk.Frame(content)
         epsilonControls.pack(pady=(4, 0))
         ttk.Label(epsilonControls, text="Manual Epsilon (0-1):").pack(side=tk.LEFT, padx=(0, 6))
@@ -206,9 +228,11 @@ class BotTrainingFrame(tk.Frame):
             self.loadProfiles()
         controller.eventBus.subscribe(PROFILE_SAVED, _reloadProfiles)
         controller.eventBus.subscribe(PROFILE_DELETED, _reloadProfiles)
+        controller.eventBus.subscribe(FIXED_MAZE_SELECTED, self._handleFixedMazeSelected)
 
     def on_show(self) -> None:
         self.loadProfiles()
+        self._updateVisualizationHint()
 
     def loadProfiles(self) -> None:
         profiles = self.controller.gameEnv.profileManager.listProfiles()
@@ -218,7 +242,55 @@ class BotTrainingFrame(tk.Frame):
                 self.profileSelect.set(self.lastSelectedProfile)
             except Exception:
                 pass
+        elif self.profileSelect.get() not in profiles:
+            try:
+                self.profileSelect.set("")
+            except Exception:
+                pass
+        self._resetPendingActions()
         self._updateWarmupStatus()
+        self._updateRandomLengthControls()
+
+    def _onProfileSelected(self, event: Any = None) -> None:
+        del event
+        self._resetPendingActions()
+        self._updateWarmupStatus()
+
+    def _setStatus(self, message: str, *, tone: str = "info") -> None:
+        colors = {
+            "info": "#374151",
+            "success": "#166534",
+            "warning": "#805b00",
+            "error": "#b91c1c",
+        }
+        self.statusVar.set(message)
+        self.statusLabel.configure(fg=colors.get(tone, colors["info"]))
+
+    def _appendLog(self, message: str) -> None:
+        self.logOutput.insert(tk.END, message.rstrip("\n") + "\n")
+        self.logOutput.see(tk.END)
+
+    def _resetWarmupClearConfirmation(self) -> None:
+        self._pendingWarmupClearProfile = None
+        try:
+            self.clearWarmupBtn.configure(text="Clear")
+        except Exception:
+            pass
+
+    def _resetTrainingResetConfirmation(self) -> None:
+        self._pendingTrainingResetProfile = None
+        try:
+            self.resetProfileBtn.configure(text="Reset Training Data")
+        except Exception:
+            pass
+
+    def _resetPendingActions(self) -> None:
+        self._resetWarmupClearConfirmation()
+        self._resetTrainingResetConfirmation()
+
+    def _handleFixedMazeSelected(self, *, label: str = "") -> None:
+        self.mazeMode.set("Fixed (Builder)")
+        self._updateRandomLengthControls()
 
     # ── Warmup collection poll ──────────────────────────────────────────────
 
@@ -373,10 +445,10 @@ class BotTrainingFrame(tk.Frame):
     def _collectWarmup(self) -> None:
         profile = self.profileSelect.get()
         if not profile:
-            messagebox.showerror("No Profile", "Select a profile before collecting warmup.")
+            self._setStatus("Select a profile before collecting warmup.", tone="error")
             return
         if self.trainingActive or self.controller.trainingController.isCollecting():
-            messagebox.showinfo("Busy", "Wait for the current run to finish.")
+            self._setStatus("Wait for the current training or warmup run to finish.", tone="warning")
             return
         collectMode = self.warmupCollectModeVar.get()
         amount = self._parseWarmupAmount(collectMode)
@@ -395,8 +467,8 @@ class BotTrainingFrame(tk.Frame):
         self.collectWarmupBtn.configure(state="disabled")
         self.clearWarmupBtn.configure(state="disabled")
         self.startBtn.configure(state="disabled")
-        self.logOutput.insert(tk.END, f"Collecting warmup for {profile}…\n")
-        self.logOutput.see(tk.END)
+        self._appendLog(f"Collecting warmup for {profile}...")
+        self._setStatus(f"Collecting warmup for {profile}.", tone="info")
         self.warmupStatusLabel.configure(text=f"Collecting… 0 {unitLabel}")
 
         def onProgress(current: int, total: int) -> None:
@@ -407,11 +479,8 @@ class BotTrainingFrame(tk.Frame):
         def onComplete(store: Any) -> None:
             def _finish() -> None:
                 self._stopCollectPoll()
-                self.logOutput.insert(
-                    tk.END,
-                    f"Warmup collected: {store.transitionCount} transitions — saved.\n",
-                )
-                self.logOutput.see(tk.END)
+                self._appendLog(f"Warmup collected: {store.transitionCount} transitions - saved.")
+                self._setStatus("Warmup collection finished and saved.", tone="success")
                 self.collectWarmupBtn.configure(state="normal")
                 self.clearWarmupBtn.configure(state="normal")
                 self.startBtn.configure(state="normal")
@@ -421,8 +490,8 @@ class BotTrainingFrame(tk.Frame):
         def onError(exc: Exception) -> None:
             def _report() -> None:
                 self._stopCollectPoll()
-                self.logOutput.insert(tk.END, f"Warmup collection failed: {exc}\n")
-                self.logOutput.see(tk.END)
+                self._appendLog(f"Warmup collection failed: {exc}")
+                self._setStatus(f"Warmup collection failed: {exc}", tone="error")
                 self.collectWarmupBtn.configure(state="normal")
                 self.clearWarmupBtn.configure(state="normal")
                 self.startBtn.configure(state="normal")
@@ -434,6 +503,7 @@ class BotTrainingFrame(tk.Frame):
             mazeMode=mode,
             randomMinGenerationLength=minGenerationLength,
             randomMaxGenerationLength=maxGenerationLength,
+            randomIncludeEnemies=self.randomIncludeEnemiesVar.get(),
             nTransitions=nTransitions,
             nCompletions=nCompletions,
             onProgress=onProgress,
@@ -446,28 +516,40 @@ class BotTrainingFrame(tk.Frame):
         if not sourceProfile:
             return
         if not self.controller.gameEnv.warmupService.hasStore(sourceProfile):
+            self._resetWarmupClearConfirmation()
             self._updateWarmupStatus()
+            self._setStatus(f"No warmup store exists for '{sourceProfile}'.", tone="info")
             return
-        if messagebox.askyesno("Clear Warmup", f"Delete the warmup store for '{sourceProfile}'?"):
-            self.controller.gameEnv.warmupService.deleteStore(sourceProfile)
-            self._loadedWarmupStore = None
-            self._loadedWarmupSourceProfile = None
-            self.useWarmupVar.set(False)
-            self._updateWarmupStatus()
-            self.logOutput.insert(tk.END, "Warmup store cleared.\n")
-            self.logOutput.see(tk.END)
+        if self._pendingWarmupClearProfile != sourceProfile:
+            self._resetTrainingResetConfirmation()
+            self._pendingWarmupClearProfile = sourceProfile
+            self.clearWarmupBtn.configure(text="Confirm Clear")
+            self._setStatus(
+                f"Click Clear again to delete the warmup store for '{sourceProfile}'.",
+                tone="warning",
+            )
+            return
+        self.controller.gameEnv.warmupService.deleteStore(sourceProfile)
+        self._resetWarmupClearConfirmation()
+        self._loadedWarmupStore = None
+        self._loadedWarmupSourceProfile = None
+        self.useWarmupVar.set(False)
+        self._updateWarmupStatus()
+        self._appendLog(f"Warmup store cleared for {sourceProfile}.")
+        self._setStatus(f"Warmup store cleared for '{sourceProfile}'.", tone="success")
 
     def startTraining(self) -> None:
         if self.trainingActive:
             return
+        self._resetPendingActions()
         selectedProfile = self.profileSelect.get()
         if not selectedProfile:
-            messagebox.showerror("Error", "No profile selected.")
+            self._setStatus("Select a profile before starting training.", tone="error")
             return
 
         roundsTxt = self.roundsEntry.get()
         if not roundsTxt.isdigit():
-            messagebox.showerror("Error", "Number of rounds must be a positive integer.")
+            self._setStatus("Number of rounds must be a positive integer.", tone="error")
             return
         rounds = int(roundsTxt)
 
@@ -478,7 +560,10 @@ class BotTrainingFrame(tk.Frame):
         minGenerationLength, maxGenerationLength = randomGenerationRange
         if mode == "Fixed (Builder)":
             if not self.controller.gameEnv.hasFixedMazeConfigured():
-                messagebox.showerror("No Fixed Maze", "No fixed maze set. Open Maze Builder to create or load one, then click 'Use In Training'.")
+                self._setStatus(
+                    "No fixed maze is set. Open Maze Builder to create or load one, then click 'Use In Training'.",
+                    tone="error",
+                )
                 return
 
         self.trainingProgress['maximum'] = rounds
@@ -486,27 +571,44 @@ class BotTrainingFrame(tk.Frame):
         self._logInterval = max(1, rounds // 100)
         self._logLastRound = 0
         self.logOutput.delete("1.0", tk.END)
-        self.logOutput.insert(tk.END, f"Training started for {selectedProfile} with {rounds} rounds...\n")
+        self._appendLog(f"Training started for {selectedProfile} with {rounds} rounds...")
         self._lastSavedEpisode = None
+        self._lastEvaluationRound = None
         self.lastSelectedProfile = selectedProfile
         self._lastWarmupState = None
         self._lastEpsilonValue = None
         self.stepCounterLabel.configure(text="Episode Steps: 0")
         self.epsilonLabel.configure(text="Epsilon: n/a")
         self.saveStatusLabel.configure(text="Save Status: waiting for first autosave")
+        self._setStatus(f"Training started for {selectedProfile}.", tone="info")
         self.setControlsEnabled(False)
         self.trainingActive = True
         self._lastMazeSize = self.controller.gameEnv.getMazeSize()
         self._startStepPoll()
         self.stopBtn.configure(state="normal")
+        evalDefinition = self._getEvaluationDefinition()
+        evalFreq = int(evalDefinition.get("frequency", 0))
+        if bool(evalDefinition.get("is_dedicated_episode", False)) and evalFreq > 0:
+            evalEpsilon = evalDefinition.get("eval_epsilon")
+            epsilonText = "n/a" if evalEpsilon is None else f"{float(evalEpsilon):.4f}"
+            savedParts: list[str] = []
+            if bool(evalDefinition.get("append_reward", False)):
+                savedParts.append("reward")
+            if bool(evalDefinition.get("save_maze_episode", False)):
+                savedParts.append("maze")
+            savedText = " + ".join(savedParts) if savedParts else "no snapshots"
+            self._appendLog(
+                f"Scheduled evaluation: every {evalFreq} rounds at epsilon {epsilonText}; "
+                f"evaluation saves {savedText} artifacts and does not create checkpoints."
+            )
 
         def onProgress(done: int, total: int):
             self.controller.root.after(0, self.updateProgress, done, total)
 
         def onError(err: Exception) -> None:
             def _report():
-                self.logOutput.insert(tk.END, f"Training error: {type(err).__name__}: {err}\n")
-                self.logOutput.see(tk.END)
+                self._appendLog(f"Training error: {type(err).__name__}: {err}")
+                self._setStatus(f"Training failed: {err}", tone="error")
                 self.trainingActive = False
                 self.setControlsEnabled(True)
                 self._stopStepPoll()
@@ -531,6 +633,7 @@ class BotTrainingFrame(tk.Frame):
                 self.epsilonLabel.configure(text="Epsilon: n/a")
                 self.saveStatusLabel.configure(text="Save Status: n/a")
                 self.stopBtn.configure(state="disabled")
+                self._setStatus("Training run finished.", tone="success")
             self.controller.root.after(0, _done)
 
         poolSize = self._parsePoolSize() if mode == "Pool" else 0
@@ -542,11 +645,9 @@ class BotTrainingFrame(tk.Frame):
                 self.stopBtn.configure(state="disabled")
                 self.saveStatusLabel.configure(text="Save Status: n/a")
                 return
-            self.logOutput.insert(
-                tk.END,
-                f"Pool mode: training will cycle through {poolSize} auto-generated random mazes.\n",
+            self._appendLog(
+                f"Pool mode: training will cycle through {poolSize} auto-generated random mazes."
             )
-            self.logOutput.see(tk.END)
         warmupStore = self._loadedWarmupStore if self.useWarmupVar.get() else None
         warmupTransitionCount = self._parseWarmupAmount("transitions") if warmupStore is not None else None
         if warmupStore is not None and warmupTransitionCount is None:
@@ -558,6 +659,7 @@ class BotTrainingFrame(tk.Frame):
             poolSize=poolSize or 20,
             randomMinGenerationLength=minGenerationLength,
             randomMaxGenerationLength=maxGenerationLength,
+            randomIncludeEnemies=self.randomIncludeEnemiesVar.get(),
             warmupStore=warmupStore,
             warmupTransitionCount=warmupTransitionCount,
             onProgress=onProgress,
@@ -569,15 +671,15 @@ class BotTrainingFrame(tk.Frame):
         label = "transitions" if mode == "transitions" else "completions"
         raw = self.warmupTransitionsVar.get().strip()
         if not raw:
-            messagebox.showerror("Invalid Warmup", f"Warmup {label} must be a positive integer.")
+            self._setStatus(f"Warmup {label} must be a positive integer.", tone="error")
             return None
         try:
             value = int(raw)
         except Exception:
-            messagebox.showerror("Invalid Warmup", f"Warmup {label} must be a positive integer.")
+            self._setStatus(f"Warmup {label} must be a positive integer.", tone="error")
             return None
         if value <= 0:
-            messagebox.showerror("Invalid Warmup", f"Warmup {label} must be greater than zero.")
+            self._setStatus(f"Warmup {label} must be greater than zero.", tone="error")
             return None
         return value
 
@@ -592,28 +694,36 @@ class BotTrainingFrame(tk.Frame):
         try:
             with open(path, 'r') as f:
                 state = json.load(f)
-            self.controller.gameEnv.setFixedMaze(state)
-            messagebox.showinfo("Fixed Maze Set", f"Using {os.path.basename(path)} for training.")
+            label = os.path.basename(path) or "Fixed Maze"
+            self.controller.gameEnv.setFixedMaze(state, label=label)
+            self.controller.eventBus.emit(FIXED_MAZE_SELECTED, label=label)
+            self._appendLog(f"Fixed maze selected: {label}")
+            self._setStatus(f"Fixed maze selected: {label}", tone="success")
             return True
         except Exception as e:
-            messagebox.showerror("Invalid Maze", f"Could not load maze: {e}")
+            self._setStatus(f"Could not load maze: {e}", tone="error")
             return False
 
     def _resetSelectedProfileTrainingData(self) -> None:
         profileName = self.profileSelect.get()
         if not profileName:
-            messagebox.showerror("Error", "No profile selected.")
+            self._setStatus("Select a profile before resetting training data.", tone="error")
             return
         if self.trainingActive or self.controller.trainingController.isActive() or self.controller.trainingController.isCollecting():
-            messagebox.showinfo("Busy", "Stop the current training or warmup run first.")
+            self._setStatus("Stop the current training or warmup run first.", tone="warning")
             return
-        if not messagebox.askyesno(
-            "Reset Training Data",
-            f"Clear all saved training data for '{profileName}'? This keeps the profile config but removes learned progress.",
-        ):
+        if self._pendingTrainingResetProfile != profileName:
+            self._resetWarmupClearConfirmation()
+            self._pendingTrainingResetProfile = profileName
+            self.resetProfileBtn.configure(text="Confirm Reset")
+            self._setStatus(
+                f"Click Reset Training Data again to clear learned progress for '{profileName}'.",
+                tone="warning",
+            )
             return
         try:
             self.controller.gameEnv.resetProfileTrainingData(profileName)
+            self._resetTrainingResetConfirmation()
             self._loadedWarmupStore = None
             self._loadedWarmupSourceProfile = None
             self._lastWarmupState = None
@@ -621,14 +731,15 @@ class BotTrainingFrame(tk.Frame):
             self.stepCounterLabel.configure(text="Episode Steps: 0")
             self.epsilonLabel.configure(text="Epsilon: n/a")
             self.useWarmupVar.set(False)
-            self.logOutput.insert(tk.END, f"Reset training data for {profileName}.\n")
-            self.logOutput.see(tk.END)
+            self._appendLog(f"Reset training data for {profileName}.")
+            self._setStatus(f"Reset training data for '{profileName}'.", tone="success")
             self.loadProfiles()
             self.profileSelect.set(profileName)
             self.lastSelectedProfile = profileName
             self._updateWarmupStatus()
         except Exception as exc:
-            messagebox.showerror("Reset Failed", str(exc))
+            self._resetTrainingResetConfirmation()
+            self._setStatus(f"Reset failed: {exc}", tone="error")
 
     def _updateRandomLengthControls(self) -> None:
         mode = self.mazeMode.get() or "Random"
@@ -638,9 +749,16 @@ class BotTrainingFrame(tk.Frame):
         else:
             if self.randomLengthFrame.winfo_ismapped():
                 self.randomLengthFrame.pack_forget()
+        if mode in {"Random", "Pool"}:
+            if not self.randomEnemyFrame.winfo_ismapped():
+                self.randomEnemyFrame.pack(before=self.mazeButtons, pady=(4, 0))
+        else:
+            if self.randomEnemyFrame.winfo_ismapped():
+                self.randomEnemyFrame.pack_forget()
         if mode == "Pool":
             if not self.poolConfigFrame.winfo_ismapped():
                 self.poolConfigFrame.pack(before=self.mazeButtons, pady=(6, 0))
+            self.mazeModeLabel.configure(text="Maze Source: Pool")
             self.mazeSourceHint.configure(
                 text="Pool mode builds a fixed set of random mazes at training start and cycles through them."
             )
@@ -648,10 +766,13 @@ class BotTrainingFrame(tk.Frame):
             if self.poolConfigFrame.winfo_ismapped():
                 self.poolConfigFrame.pack_forget()
             if mode == "Fixed (Builder)":
+                fixedLabel = self.controller.gameEnv.getFixedMazeLabel() or "Builder Maze"
+                self.mazeModeLabel.configure(text=f"Maze Source: {fixedLabel}")
                 self.mazeSourceHint.configure(
-                    text="Fixed mode reuses the maze currently selected from the builder or file chooser."
+                    text=f"Fixed mode reuses the selected maze: {fixedLabel}."
                 )
             else:
+                self.mazeModeLabel.configure(text="Maze Source: Random")
                 self.mazeSourceHint.configure(
                     text="Random mode generates a new maze each reset. Min/Max Generation Length constrain path length."
                 )
@@ -659,15 +780,15 @@ class BotTrainingFrame(tk.Frame):
     def _parsePoolSize(self) -> int | None:
         raw = self.poolSizeVar.get().strip()
         if not raw:
-            messagebox.showerror("Invalid Pool Size", "Pool size must be a positive integer.")
+            self._setStatus("Pool size must be a positive integer.", tone="error")
             return None
         try:
             value = int(raw)
         except Exception:
-            messagebox.showerror("Invalid Pool Size", "Pool size must be a positive integer.")
+            self._setStatus("Pool size must be a positive integer.", tone="error")
             return None
         if value <= 0:
-            messagebox.showerror("Invalid Pool Size", "Pool size must be greater than zero.")
+            self._setStatus("Pool size must be greater than zero.", tone="error")
             return None
         return value
 
@@ -682,24 +803,24 @@ class BotTrainingFrame(tk.Frame):
             try:
                 minValue = int(rawMin)
             except Exception:
-                messagebox.showerror("Invalid Generation Length", "Minimum generation length must be an integer.")
+                self._setStatus("Minimum generation length must be an integer.", tone="error")
                 return None
             if minValue < 0:
-                messagebox.showerror("Invalid Generation Length", "Minimum generation length must be 0 or greater.")
+                self._setStatus("Minimum generation length must be 0 or greater.", tone="error")
                 return None
         if rawMax:
             try:
                 maxValue = int(rawMax)
             except Exception:
-                messagebox.showerror("Invalid Generation Length", "Maximum generation length must be an integer.")
+                self._setStatus("Maximum generation length must be an integer.", tone="error")
                 return None
             if maxValue < 0:
-                messagebox.showerror("Invalid Generation Length", "Maximum generation length must be 0 or greater.")
+                self._setStatus("Maximum generation length must be 0 or greater.", tone="error")
                 return None
         if minValue is not None and maxValue is not None and minValue > maxValue:
-            messagebox.showerror(
-                "Invalid Generation Length",
+            self._setStatus(
                 "Minimum generation length must be less than or equal to maximum generation length.",
+                tone="error",
             )
             return None
         return (minValue, maxValue)
@@ -722,6 +843,7 @@ class BotTrainingFrame(tk.Frame):
         try:
             self.randomMinGenerationLengthEntry.configure(state=entryState)
             self.randomMaxGenerationLengthEntry.configure(state=entryState)
+            self.randomIncludeEnemiesCheck.configure(state=entryState)
         except Exception:
             pass
         try:
@@ -767,13 +889,14 @@ class BotTrainingFrame(tk.Frame):
         self.stepCounterLabel.configure(text="Episode Steps: 0")
         self.epsilonLabel.configure(text="Epsilon: n/a")
         self.saveStatusLabel.configure(text="Save Status: n/a")
+        self._setStatus("Stop requested. Waiting for the current episode to finish.", tone="warning")
 
     def updateProgress(self, completedRounds: int, totalRounds: int) -> None:
         self.trainingProgress['value'] = completedRounds
         if (
             completedRounds == totalRounds
             or completedRounds == 1
-            or completedRounds - self._logLastRound >= self._logInterval
+            or completedRounds % self._logInterval == 0
         ):
             profile = self.controller.trainingController.activeProfile or self.lastSelectedProfile or self.profileSelect.get()
             bot = next(
@@ -805,14 +928,13 @@ class BotTrainingFrame(tk.Frame):
             parts = [f"Round {completedRounds}/{totalRounds}", outcomeText, f"steps: {steps}", f"wall hits: {wallHits}"]
             if kills:
                 parts.append(f"kills: {kills}")
-            self.logOutput.insert(tk.END, "  |  ".join(parts) + "\n")
-            self.logOutput.see(tk.END)
+            self._appendLog("  |  ".join(parts))
             self._logLastRound = completedRounds
             if bot is not None:
                 self._updateSaveStatus(bot, completedRounds)
+                self._logEvaluationStatus(bot, completedRounds)
         if completedRounds == totalRounds:
-            self.logOutput.insert(tk.END, "Training completed.\n")
-            self.logOutput.see(tk.END)
+            self._appendLog("Training completed.")
             self.trainingActive = False
             self.setControlsEnabled(True)
             self._stopStepPoll()
@@ -822,6 +944,7 @@ class BotTrainingFrame(tk.Frame):
             self.stepCounterLabel.configure(text="Episode Steps: 0")
             self.epsilonLabel.configure(text="Epsilon: n/a")
             self.saveStatusLabel.configure(text="Save Status: n/a")
+            self._setStatus("Training completed.", tone="success")
 
     def cancelTrainingPoll(self) -> None:
         self._stopStepPoll()
@@ -867,14 +990,12 @@ class BotTrainingFrame(tk.Frame):
         if self._lastWarmupState is None:
             self._lastWarmupState = warmupActive
             if warmupActive:
-                self.logOutput.insert(tk.END, "Warmup entered.\n")
-                self.logOutput.see(tk.END)
+                self._appendLog("Warmup entered.")
             return
 
         if warmupActive != self._lastWarmupState:
             self._lastWarmupState = warmupActive
-            self.logOutput.insert(tk.END, "Warmup entered.\n" if warmupActive else "Warmup completed.\n")
-            self.logOutput.see(tk.END)
+            self._appendLog("Warmup entered." if warmupActive else "Warmup completed.")
 
     def _updateMazeSizeLog(self) -> None:
         try:
@@ -887,11 +1008,9 @@ class BotTrainingFrame(tk.Frame):
         if currentSize != self._lastMazeSize:
             previousSize = self._lastMazeSize
             self._lastMazeSize = currentSize
-            self.logOutput.insert(
-                tk.END,
-                f"Curriculum maze size increased: {previousSize[0]}x{previousSize[1]} -> {currentSize[0]}x{currentSize[1]}\n",
+            self._appendLog(
+                f"Curriculum maze size increased: {previousSize[0]}x{previousSize[1]} -> {currentSize[0]}x{currentSize[1]}"
             )
-            self.logOutput.see(tk.END)
 
     def _updateEpsilonDisplay(self, bot: Any) -> None:
         try:
@@ -909,28 +1028,53 @@ class BotTrainingFrame(tk.Frame):
             return
         profileName = str(getattr(bot, "profileName", ""))
         label = status.artifact_save_label
-
-        if label == "Q-table":
-            if self._lastSavedEpisode != completedRounds:
-                self._lastSavedEpisode = completedRounds
-                self.logOutput.insert(tk.END, f"Autosaved {profileName} after round {completedRounds} ({label}).\n")
-                self.logOutput.see(tk.END)
-            self.saveStatusLabel.configure(text=f"Save Status: autosaved after round {completedRounds} ({label})")
-            return
-
-        freq = status.checkpoint_frequency
+        freq = max(0, int(status.checkpoint_frequency))
         count = status.episode_count
         if freq > 0 and count > 0 and count % freq == 0:
             if self._lastSavedEpisode != count:
                 self._lastSavedEpisode = count
-                self.logOutput.insert(tk.END, f"Autosaved {profileName} after round {count} ({label}).\n")
-                self.logOutput.see(tk.END)
-            self.saveStatusLabel.configure(text=f"Save Status: autosaved after round {count} ({label})")
+                self._appendLog(f"Autosaved {profileName} after round {completedRounds} ({label}).")
+            self.saveStatusLabel.configure(text=f"Save Status: autosaved after round {completedRounds} ({label})")
         elif freq > 0:
-            nextSave = freq * ((count // freq) + 1)
+            rounds_to_next = freq if count <= 0 else (freq - (count % freq))
+            nextSave = completedRounds + rounds_to_next
             self.saveStatusLabel.configure(text=f"Save Status: next {label} at round {nextSave}")
         else:
             self.saveStatusLabel.configure(text="Save Status: checkpoint autosave disabled")
+
+    def _logEvaluationStatus(self, bot: Any, completedRounds: int) -> None:
+        definition = self._getEvaluationDefinition(bot)
+        evalFreq = int(definition.get("frequency", 0))
+        if (
+            not bool(definition.get("is_dedicated_episode", False))
+            or evalFreq <= 0
+            or completedRounds <= 0
+            or completedRounds % evalFreq != 0
+        ):
+            return
+        if self._lastEvaluationRound == completedRounds:
+            return
+        self._lastEvaluationRound = completedRounds
+        success = getattr(bot, "lastEvaluationSuccess", None)
+        steps = getattr(bot, "lastEvaluationSteps", None)
+        reward = getattr(bot, "lastEvaluationReward", None)
+        evalEpsilon = definition.get("eval_epsilon")
+        epsilonText = "n/a" if evalEpsilon is None else f"{float(evalEpsilon):.4f}"
+        parts = [f"Evaluation after round {completedRounds}", f"epsilon: {epsilonText}"]
+        if success is not None:
+            parts.append("goal reached" if bool(success) else "failed")
+        if steps is not None:
+            parts.append(f"steps: {int(steps)}")
+        if reward is not None:
+            parts.append(f"reward: {float(reward):.2f}")
+        savedParts: list[str] = []
+        if bool(definition.get("append_reward", False)):
+            savedParts.append("reward")
+        if bool(definition.get("save_maze_episode", False)):
+            savedParts.append("maze")
+        parts.append(f"saved: {' + '.join(savedParts) if savedParts else 'none'}")
+        parts.append("checkpoint unchanged")
+        self._appendLog("  |  ".join(parts))
 
     def _getActiveBot(self) -> Any | None:
         profile = self.controller.trainingController.activeProfile or self.profileSelect.get()
@@ -941,37 +1085,76 @@ class BotTrainingFrame(tk.Frame):
         except Exception:
             return None
 
+    def _getEvaluationDefinition(self, bot: Any | None = None) -> dict[str, Any]:
+        target = bot if bot is not None else self._getActiveBot()
+        getter = getattr(target, "getEvaluationEpisodeDefinition", None)
+        if callable(getter):
+            try:
+                definition = getter()
+                persistence = getattr(definition, "persistence", None)
+                return {
+                    "frequency": max(0, int(getattr(definition, "frequency", 0))),
+                    "is_dedicated_episode": getattr(definition, "is_dedicated_episode", False),
+                    "eval_epsilon": getattr(definition, "eval_epsilon", None),
+                    "save_maze_episode": getattr(persistence, "save_maze_episode", False),
+                    "append_reward": getattr(persistence, "append_reward", False),
+                }
+            except Exception:
+                pass
+        selectedProfile = self.profileSelect.get() or self.lastSelectedProfile
+        if selectedProfile:
+            try:
+                profile = self.controller.gameEnv.profileManager.loadProfile(selectedProfile)
+                if str(getattr(profile, "botType", "")) == "DQNBot":
+                    freq = int(getattr(getattr(profile, "config", None), "evaluationFrequency", 0))
+                    return {
+                        "frequency": max(0, freq),
+                        "is_dedicated_episode": freq > 0,
+                        "eval_epsilon": 0.0,
+                        "save_maze_episode": True,
+                        "append_reward": True,
+                    }
+            except Exception:
+                pass
+        return {
+            "frequency": 0,
+            "is_dedicated_episode": False,
+            "eval_epsilon": None,
+            "save_maze_episode": False,
+            "append_reward": False,
+        }
+
     def applyManualEpsilon(self) -> None:
         raw = self.epsilonEntry.get().strip()
         if not raw:
-            messagebox.showerror("Invalid Epsilon", "Enter a value between 0 and 1.")
+            self._setStatus("Enter a manual epsilon value between 0 and 1.", tone="error")
             return
         try:
             value = float(raw)
         except Exception:
-            messagebox.showerror("Invalid Epsilon", "Manual epsilon must be numeric.")
+            self._setStatus("Manual epsilon must be numeric.", tone="error")
             return
         bot = self._getActiveBot()
         if bot is None or not bot.setManualEpsilon(value):
-            messagebox.showerror("Unsupported", "Active profile is not a DQN bot.")
+            self._setStatus("Manual epsilon override is only available for DQN bots.", tone="error")
             return
-        self.logOutput.insert(tk.END, f"Manual epsilon override applied: {value:.4f}\n")
-        self.logOutput.see(tk.END)
+        self._appendLog(f"Manual epsilon override applied: {value:.4f}")
+        self._setStatus(f"Manual epsilon override applied: {value:.4f}", tone="success")
 
     def clearManualEpsilon(self) -> None:
         bot = self._getActiveBot()
         if bot is None or not bot.setManualEpsilon(None):
-            messagebox.showerror("Unsupported", "Active profile is not a DQN bot.")
+            self._setStatus("Manual epsilon override is only available for DQN bots.", tone="error")
             return
-        self.logOutput.insert(tk.END, "Manual epsilon override cleared.\n")
-        self.logOutput.see(tk.END)
+        self._appendLog("Manual epsilon override cleared.")
+        self._setStatus("Manual epsilon override cleared.", tone="success")
 
     def openVisualization(self) -> None:
         from ui.frames.visualization import VisualizationWindow
 
         selectedProfile = self.profileSelect.get()
         if not selectedProfile:
-            messagebox.showerror("Error", "No profile selected.")
+            self._setStatus("Select a profile before opening visualization.", tone="error")
             return
         mode = self.mazeMode.get() or "Random"
         randomGenerationRange = self._parseRandomGenerationLengthRange(mode)
@@ -986,8 +1169,11 @@ class BotTrainingFrame(tk.Frame):
                 )
             else:
                 self.controller.gameEnv.setRandomGenerationLengthRange(None, None)
+            self.controller.gameEnv.setRandomIncludeEnemies(
+                mode in {"Random", "Pool"} and self.randomIncludeEnemiesVar.get()
+            )
         except Exception as exc:
-            messagebox.showerror("Invalid Generation Length", str(exc))
+            self._setStatus(str(exc), tone="error")
             return
         profileIndex = next(
             (
@@ -1004,11 +1190,24 @@ class BotTrainingFrame(tk.Frame):
         existingWindow = self.visualizationWindow
         if existingWindow is not None and existingWindow.winfo_exists():
             existingWindow.focus()
+            self._updateVisualizationHint()
         else:
             self.visualizationWindow = VisualizationWindow(self.controller.root, self.controller.gameEnv, selectedProfile, profileIndex)
+            self.visualizationWindow.bind("<Destroy>", lambda _event: self._onVisualizationClosed(), add="+")
             try:
-                self.logOutput.insert(tk.END, "Opened visualization. Training is PAUSED while the window is open.\n")
-                self.logOutput.see(tk.END)
-                self.statusHint.configure(text="Note: Training is paused while visualization is open.")
+                self._appendLog("Opened visualization. Training is PAUSED while the window is open.")
+                self._setStatus("Visualization opened for the selected profile.", tone="success")
+                self._updateVisualizationHint()
             except Exception:
                 pass
+
+    def _updateVisualizationHint(self) -> None:
+        window = self.visualizationWindow
+        if window is not None and window.winfo_exists():
+            self.statusHint.configure(text="Note: Training is paused while visualization is open.")
+        elif str(self.statusHint.cget("text")).startswith("Note: Training is paused"):
+            self.statusHint.configure(text="")
+
+    def _onVisualizationClosed(self) -> None:
+        self.visualizationWindow = None
+        self._updateVisualizationHint()

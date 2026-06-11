@@ -5,8 +5,8 @@ from typing import Any
 from services.diagnostics import DiagnosticsService
 from gameEnvironment import GameEnvironment
 from services.training import TrainingController
-from ui.app_state import AppState
-from ui.event_bus import EventBus
+from ui.appState import AppState
+from ui.eventBus import EventBus
 
 
 class MazeAIApp:
@@ -30,7 +30,7 @@ class MazeAIApp:
     ):
         self.root = root
         self.diagnostics = diagnostics
-        self.root.title("Maze AI Experiment")
+        self.root.title("RL Maze Explorer")
         self.root.rowconfigure(0, weight=1)
         self.root.columnconfigure(0, weight=1)
         # Ensure a default folder exists for user mazes
@@ -66,9 +66,10 @@ class MazeAIApp:
         self.menuBar.add_cascade(label="Navigation", menu=self.navMenu)
         self.navMenu.add_command(label="Profile Management", command=self.show_profile_management)
         self.navMenu.add_command(label="Bot Training", command=self.show_bot_training)
+        self.navMenu.add_command(label="Research Mode", command=self.show_research)
         self.navMenu.add_command(label="Maze Builder", command=self.show_maze_builder)
         self.navMenu.add_command(label="Visualizations", command=self.show_visualizations)
-        self.navMenu.add_command(label="Exit", command=self.root.quit)
+        self.navMenu.add_command(label="Exit", command=self.on_close)
 
     def createNavigationBar(self) -> None:
         self.create_navigation_bar()
@@ -78,6 +79,7 @@ class MazeAIApp:
         from ui.frames.profileManagement import ProfileManagementFrame
         from ui.frames.createEditProfile import CreateEditProfileFrame
         from ui.frames.training import BotTrainingFrame
+        from ui.frames.research import ResearchFrame
         from ui.frames.mazeBuilder import MazeBuilderFrame
         from ui.frames.visualization import VisualizationFrame
 
@@ -86,6 +88,7 @@ class MazeAIApp:
             ProfileManagementFrame,
             CreateEditProfileFrame,
             BotTrainingFrame,
+            ResearchFrame,
             MazeBuilderFrame,
             VisualizationFrame,
         ):
@@ -131,6 +134,12 @@ class MazeAIApp:
     def showBotTraining(self) -> None:
         self.show_bot_training()
 
+    def show_research(self) -> None:
+        self.show_frame("ResearchFrame")
+
+    def showResearch(self) -> None:
+        self.show_research()
+
     def show_visualizations(self) -> None:
         self.show_frame("VisualizationFrame")
 
@@ -151,6 +160,14 @@ class MazeAIApp:
                 cancel_poll = getattr(bt, "cancel_training_poll", None) or getattr(bt, "cancelTrainingPoll", None)
                 if callable(cancel_poll):
                     cancel_poll()
+        except Exception:
+            pass
+        try:
+            research = self.frames.get("ResearchFrame")
+            if research:
+                cancel_run = getattr(research, "cancel_active_run", None)
+                if callable(cancel_run):
+                    cancel_run()
         except Exception:
             pass
         # Request training controller to stop background thread
