@@ -4,6 +4,7 @@ import os
 import tkinter as tk
 from dataclasses import dataclass
 
+from defaultProfiles import ensure_default_profiles
 from gameEnvironment import GameEnvironment
 from services.diagnostics import DiagnosticsService
 from services.training import TrainingController
@@ -33,6 +34,7 @@ def build_app_services() -> AppServices:
     ensure_app_directories()
     diagnostics = DiagnosticsService()
     game_environment = GameEnvironment(diagnostics=diagnostics)
+    ensure_default_profiles(game_environment.profileManager, game_environment.repository)
     training_controller = TrainingController(game_environment, diagnostics=diagnostics)
     event_bus = EventBus(diagnostics=diagnostics)
     app_state = AppState()

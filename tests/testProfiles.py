@@ -8,6 +8,11 @@ from botConfigs import botConfigs
 from botFactory import BotFactory
 from botProfile import BotProfile, ProfileManager
 from botStatistics import BotStatistics
+from defaultProfiles import (
+    DEFAULT_DQN_PROFILE_NAME,
+    DEFAULT_QLEARNING_PROFILE_NAME,
+    ensure_default_profiles,
+)
 from bots.dqnlearning import DQNConfig
 from bots.qlearning import QLearningConfig
 from rewardSystem import RewardConfig
@@ -166,3 +171,47 @@ def test_profile_manager_round_trips_reward_modifiers(tmp_path) -> None:
 
     assert loaded.rewardConfig.rewardModifiers["per_move_penalty"] == "-0.5"
     assert loaded.rewardConfig.rewardModifiers["goal_reached"] == "1234"
+
+
+def test_ensure_default_profiles_creates_reviewer_presets(tmp_path) -> None:
+    manager = ProfileManager(str(tmp_path))
+    repository = ArtifactsRepository(baseDir=str(tmp_path))
+
+    ensure_default_profiles(manager, repository)
+
+    names = set(manager.listProfiles())
+    assert DEFAULT_DQN_PROFILE_NAME in names
+    assert DEFAULT_QLEARNING_PROFILE_NAME in names
+
+    dqn_profile = manager.loadProfile(DEFAULT_DQN_PROFILE_NAME)
+    q_profile = manager.loadProfile(DEFAULT_QLEARNING_PROFILE_NAME)
+
+    assert isinstance(dqn_profile.config, DQNConfig)
+    assert dqn_profile.config.useMacroActions is True
+    assert dqn_profile.config.macroOptionSet == "astar"
+    assert dqn_profile.rewardConfig.usePotentialShaping is True
+    assert dqn_profile.rewardConfig.progressScale == 14.0
+
+    assert isinstance(q_profile.config, QLearningConfig)
+    assert q_profile.config.useMacroActions is True
+    assert q_profile.rewardConfig.rewardModifiers["move_in_optimal_path"] == "30"
+
+
+def test_ensure_default_profiles_does_not_overwrite_existing_profiles(tmp_path) -> None:
+    manager = ProfileManager(str(tmp_path))
+    repository = ArtifactsRepository(baseDir=str(tmp_path))
+    existing = BotProfile(
+        name=DEFAULT_DQN_PROFILE_NAME,
+        botType="DQNBot",
+        config=DQNConfig(learningRate=9e-4),
+        rewardConfig=RewardConfig(),
+        statistics=BotStatistics(),
+        botSpecificData={"edited": True},
+    )
+    manager.saveProfile(existing)
+
+    ensure_default_profiles(manager, repository)
+
+    loaded = manager.loadProfile(DEFAULT_DQN_PROFILE_NAME)
+    assert loaded.config.learningRate == 9e-4
+    assert loaded.botSpecificData == {"edited": True}
