@@ -55,7 +55,7 @@ pip install -r requirements.txt
 **Launch the application:**
 
 ```bash
-python code/ui/app.py
+python code/main.py
 ```
 
 ---
